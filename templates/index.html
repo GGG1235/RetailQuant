@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>rQuant · {{ today }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <nav class="navbar">
+    <span class="logo">📊 rQuant</span>
+    <span class="date">{{ today }}</span>
+    <button onclick="location.reload()" class="btn-sm">🔄 刷新</button>
+  </nav>
+
+  <div class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for cat, msg in messages %}
+          <div class="flash flash-{{ cat }}">{{ msg }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <!-- 顶部卡片 -->
+    <div class="cards">
+      <div class="card">
+        <div class="label">总成本</div>
+        <div class="value">¥{{ "{:,.0f}".format(total_cost) }}</div>
+      </div>
+      <div class="card">
+        <div class="label">总市值</div>
+        <div class="value">¥{{ "{:,.0f}".format(total_market) }}</div>
+      </div>
+      <div class="card {% if total_pnl > 0 %}green{% elif total_pnl < 0 %}red{% endif %}">
+        <div class="label">总盈亏</div>
+        <div class="value">
+          {{ '{:+,.0f}'.format(total_pnl) }}
+          <span class="pct">({{ '{:+.2f}'.format(total_pnl_pct) }}%)</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="label">持仓数</div>
+        <div class="value">{{ positions|length }}</div>
+      </div>
+    </div>
+
+    <!-- 信号区 -->
+    <div class="row">
+      <div class="box">
+        <h2>📉 卖出提示 <span class="badge red">{{ sell_signals|length }}</span></h2>
+        {% if sell_signals %}
+          {% for s in sell_signals %}
+          <div class="signal sig-{{ s.urgency }}">
+            <div class="sig-head">
+              <span><b>{{ s.code }}</b> {{ s.name }}</span>
+              <span class="urgency-tag urgency-{{ s.urgency }}">{{ s.urgency }}</span>
+            </div>
+            <div class="sig-reason">{{ s.reason }}</div>
+            <div class="sig-detail">建议卖 ¥{{ "%.2f"|format(s.suggested_price) }}</div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <p class="empty">✅ 无（持仓健康）</p>
+        {% endif %}
+      </div>
+
+      <div class="box">
+        <h2>🔥 买入信号 <span class="badge green">{{ buy_signals|length }}</span></h2>
+        {% if buy_signals %}
+          {% for s in buy_signals %}
+          <div class="signal">
+            <div class="sig-head">
+              <span><b>{{ s.code }}</b> {{ s.name }} · {{ s.sector }}</span>
+              <span class="strat-tag">{{ s.strategy }}</span>
+            </div>
+            <div class="sig-reason">{{ s.reason }}</div>
+            <div class="sig-detail">
+              现价 ¥{{ "%.2f"|format(s.current_price) }} → 买 ¥{{ "%.2f"|format(s.suggested_buy) }}
+              · 止损 ¥{{ "%.2f"|format(s.stop_loss) }} · 止盈 ¥{{ "%.2f"|format(s.take_profit) }}
+            </div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <p class="empty">📭 今日无信号</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- 持仓 -->
+    <div class="box">
+      <h2>📦 当前持仓</h2>
+      <button onclick="showAddForm()" class="btn">+ 添加</button>
+      <div id="add-form" class="form" style="display:none;">
+        <form method="POST" action="{{ url_for('add_position') }}">
+          <input type="text" name="code" placeholder="代码 sh600460" required pattern="(sh|sz)\d{6}">
+          <input type="number" name="shares" placeholder="股数（100整数倍）" required min="100" step="100">
+          <input type="number" name="price" placeholder="价格" required step="0.01" min="0.01">
+          <button type="submit" class="btn-primary">买入</button>
+          <button type="button" onclick="hideAddForm()" class="btn">取消</button>
+        </form>
+      </div>
+
+      {% if positions %}
+      <table>
+        <thead>
+          <tr>
+            <th>代码</th><th>名称</th><th>股数</th><th>成本</th>
+            <th>现价</th><th>市值</th><th>盈亏</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in positions %}
+          <tr>
+            <td><code>{{ p.code }}</code></td>
+            <td>{{ p.name }}</td>
+            <td>{{ p.shares }}</td>
+            <td>¥{{ "%.2f"|format(p.avg_cost) }}</td>
+            <td>¥{{ "%.2f"|format(p.current_price) }}</td>
+            <td>¥{{ "{:,.0f}".format(p.market_value) }}</td>
+            <td class="{% if p.pnl > 0 %}green{% elif p.pnl < 0 %}red{% endif %}">
+              {{ '{:+,.0f}'.format(p.pnl) }}<br>
+              <span class="pct">{{ '{:+.2f}'.format(p.pnl_pct) }}%</span>
+            </td>
+            <td>
+              <button type="button" onclick="showSellForm('{{ p.code }}', {{ p.shares }}, {{ p.current_price }})" class="btn-sell">卖</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <p class="empty">📭 暂无持仓</p>
+      {% endif %}
+    </div>
+
+    <!-- 卖出弹窗 -->
+    <div id="sell-modal" class="modal" style="display:none;">
+      <div class="modal-content">
+        <h3>🔴 卖出 <span id="sell-code"></span></h3>
+        <p style="color:#888;">持仓: <span id="sell-held"></span> 股 · 现价: ¥<span id="sell-price"></span></p>
+        <form method="POST" id="sell-form" action="">
+          <label>卖出价格 <input type="number" name="price" id="sell-price-input" step="0.01" required></label>
+          <label>卖出股数 <input type="number" name="shares" id="sell-shares-input" min="100" step="100" required></label>
+          <div id="sell-preview" style="background:#1a1a2e;padding:10px;border-radius:4px;margin:10px 0;"></div>
+          <button type="submit" class="btn-primary">确认卖出</button>
+          <button type="button" onclick="closeSell()" class="btn">取消</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- 交易历史 -->
+    {% if trades %}
+    <div class="box">
+      <h2>📜 交易历史</h2>
+      <table>
+        <thead>
+          <tr><th>ID</th><th>日期</th><th>方向</th><th>代码</th><th>名称</th><th>股数</th><th>价格</th><th>备注</th><th>操作</th></tr>
+        </thead>
+        <tbody>
+          {% for t in trades %}
+          <tr>
+            <td>{{ t.id }}</td>
+            <td>{{ t.date }}</td>
+            <td>{% if t.side == 'BUY' %}🟢 买{% else %}🔴 卖{% endif %}</td>
+            <td><code>{{ t.code }}</code></td>
+            <td>{{ t.name }}</td>
+            <td>{{ t.shares }}</td>
+            <td>¥{{ "%.2f"|format(t.price) }}</td>
+            <td>{{ t.note }}</td>
+            <td>
+              <button type="button" onclick="deleteTrade('{{ t.id }}')" class="btn-sell">删</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+
+  <script>
+  function showAddForm() { document.getElementById('add-form').style.display = 'block'; }
+  function hideAddForm() { document.getElementById('add-form').style.display = 'none'; }
+
+  function showSellForm(code, held, currentPrice) {
+    document.getElementById('sell-code').textContent = code;
+    document.getElementById('sell-held').textContent = held;
+    document.getElementById('sell-price').textContent = currentPrice.toFixed(2);
+    document.getElementById('sell-price-input').value = currentPrice.toFixed(2);
+    document.getElementById('sell-shares-input').value = held;
+    document.getElementById('sell-shares-input').max = held;
+    document.getElementById('sell-form').action = '/position/sell/' + code;
+    document.getElementById('sell-modal').style.display = 'flex';
+    updatePreview();
+  }
+  function closeSell() { document.getElementById('sell-modal').style.display = 'none'; }
+  function updatePreview() {
+    const price = parseFloat(document.getElementById('sell-price-input').value) || 0;
+    const shares = parseInt(document.getElementById('sell-shares-input').value) || 0;
+    const proceeds = (price * shares).toFixed(0);
+    document.getElementById('sell-preview').innerHTML = `卖出金额: ¥${proceeds}（含手续费印花税约 ¥${(proceeds*0.00125).toFixed(0)}）`;
+  }
+  document.getElementById('sell-price-input').oninput = updatePreview;
+  document.getElementById('sell-shares-input').oninput = updatePreview;
+
+  function deleteTrade(id) {
+    if (!confirm('确认删除交易 ' + id + '？')) return;
+    fetch('/trade/delete/' + id, { method: 'POST' })
+      .then(() => location.reload());
+  }
+  </script>
+</body>
+</html>
