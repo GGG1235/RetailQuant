@@ -67,7 +67,7 @@ def fetch_kline(code: str, days: int = 250) -> pd.DataFrame:
                     merged.sort(key=lambda x: x.get("day", ""))
                     merged = merged[-days:]
                     cached = merged
-                    cache_file.write_text(json.dumps(cached, ensure_ascii=False))
+                    cache_file.write_text(json.dumps(cached, ensure_ascii=False), encoding='utf-8')
         except Exception as e:
             print(f"⚠️ 拉数失败 {code}: {e}")
 
@@ -83,8 +83,67 @@ def fetch_kline(code: str, days: int = 250) -> pd.DataFrame:
     return df[["date", "open", "high", "low", "close", "volume"]]
 
 
-# 5 只标的池
-STOCK_POOL = [
+# ============== 全局内存股票字典 ==============
+
+_stock_store: Dict[str, Dict[str, Any]] = {}
+
+def upsert_stock(code: str, **kwargs: Any) -> None:
+    """将股票信息写入全局内存字典（合并更新）"""
+    if code not in _stock_store:
+        _stock_store[code] = {}
+    _stock_store[code].update(kwargs)
+
+def get_stock(code: str) -> Dict[str, Any]:
+    """从内存字典读取单只股票信息"""
+    return _stock_store.get(code, {})
+
+def get_all_stocks() -> Dict[str, Dict[str, Any]]:
+    """返回全局股票字典的浅拷贝"""
+    return dict(_stock_store)
+
+
+# ============== 自选股（仅持久化 code 列表） ==============
+
+WATCHLIST_FILE = CACHE_DIR / "watchlist.json"
+
+def _load_json(path: Path, default=None):
+    if not path.exists():
+        return default if default is not None else []
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return default if default is not None else []
+
+def _save_json(path: Path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+
+def get_watchlist_codes() -> List[str]:
+    """返回自选股 code 列表"""
+    return _load_json(WATCHLIST_FILE, [])
+
+def add_to_watchlist(code: str) -> bool:
+    """添加 code 到自选股（持久化），返回是否真正新增"""
+    codes = get_watchlist_codes()
+    if code not in codes:
+        codes.append(code)
+        _save_json(WATCHLIST_FILE, codes)
+        return True
+    return False
+
+def remove_from_watchlist(code: str) -> bool:
+    """从自选股移除 code（持久化），返回是否真正删除"""
+    codes = get_watchlist_codes()
+    if code in codes:
+        codes.remove(code)
+        _save_json(WATCHLIST_FILE, codes)
+        return True
+    return False
+
+
+# ============== 标的池（用于信号扫描） ==============
+
+_DEFAULT_POOL = [
     {"code": "sh600460", "name": "士兰微", "sector": "半导体"},
     {"code": "sh600519", "name": "贵州茅台", "sector": "消费"},
     {"code": "sh601318", "name": "中国平安", "sector": "金融"},
@@ -92,6 +151,17 @@ STOCK_POOL = [
     {"code": "sh600036", "name": "招商银行", "sector": "金融"},
 ]
 
-
 def get_pool() -> List[Dict[str, str]]:
-    return STOCK_POOL
+    """返回扫描池：优先从自选股列表 + 内存字典拼装，为空时回退默认池"""
+    codes = get_watchlist_codes()
+    if not codes:
+        return list(_DEFAULT_POOL)
+    pool = []
+    for code in codes:
+        info = _stock_store.get(code, {})
+        pool.append({
+            "code": code,
+            "name": info.get("name", code),
+            "sector": info.get("sector", ""),
+        })
+    return pool

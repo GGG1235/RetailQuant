@@ -19,9 +19,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import data
 import strategy
 import portfolio as pf
+import board
+import squarify
 
 app = Flask(__name__)
 app.secret_key = "rquant-dev-key"  # 仅本地用
+
+
+def _log(msg: str):
+    """统一日志输出：带时间戳，写 stderr 确保 waitress 不吞"""
+    import sys
+    ts = datetime.now().strftime("%H:%M:%S")
+    sys.stderr.write(f"[{ts}] [app] {msg}\n")
+    sys.stderr.flush()
 
 
 def _safe_float(x, default=0.0):
@@ -42,6 +52,7 @@ def _safe_int(x, default=0):
 
 @app.route("/")
 def index():
+    _log("首页被访问 —— 如果你看到这行，说明浏览器确实连接到了服务器")
     # 1. 持仓
     positions_raw = pf.get_positions()
     positions = []
@@ -88,6 +99,23 @@ def index():
     # 5. 交易历史
     trades = sorted(pf.list_trades(), key=lambda x: x["datetime"], reverse=True)
 
+    # 6. 自选股（用内存字典补全行情）
+    watchlist_codes = data.get_watchlist_codes()
+    watchlist_stocks = []
+    held_codes = {p["code"] for p in positions_raw}
+    for code in watchlist_codes:
+        info = data.get_stock(code)
+        curr_price = info.get("price", 0)
+        change_pct = info.get("change_pct", 0)
+        watchlist_stocks.append({
+            "code": code,
+            "name": info.get("name", code),
+            "price": round(curr_price, 2) if curr_price else 0,
+            "change_pct": round(change_pct, 2),
+            "sector": info.get("sector", ""),
+            "is_held": code in held_codes,
+        })
+
     return render_template(
         "index.html",
         today=datetime.now().strftime("%Y-%m-%d"),
@@ -100,6 +128,8 @@ def index():
         buy_signals=buy_signals,
         snapshots=snapshots,
         trades=trades,
+        watchlist_codes=watchlist_codes,
+        watchlist_stocks=watchlist_stocks,
     )
 
 
@@ -171,6 +201,124 @@ def save_snapshot():
     return jsonify({"ok": True, "date": datetime.now().strftime("%Y-%m-%d")})
 
 
+# ============== 板块行情 API ==============
+
+# Treemap 画布尺寸（与前端 Canvas 宽高比一致）
+TREEMAP_W, TREEMAP_H = 900, 500
+
+
+def _compute_treemap(boards: list) -> list:
+    """用 squarify 库计算 Treemap 矩形坐标，附加到每个板块上"""
+    if not boards:
+        return boards
+    values = [max(abs(b["change_pct"]), 0.3) for b in boards]
+    normed = squarify.normalize_sizes(values, TREEMAP_W, TREEMAP_H)
+    rects = squarify.squarify(normed, 0, 0, TREEMAP_W, TREEMAP_H)
+    # 矩形按面积降序排列，需按原顺序映射回去
+    indexed = sorted(enumerate(values), key=lambda x: -x[1])
+    for rank, (orig_idx, _) in enumerate(indexed):
+        r = rects[rank]
+        boards[orig_idx]["x"] = r["x"]
+        boards[orig_idx]["y"] = r["y"]
+        boards[orig_idx]["w"] = r["dx"]
+        boards[orig_idx]["h"] = r["dy"]
+    return boards
+
+
+@app.route("/api/boards")
+def api_boards():
+    """返回板块排行 JSON + Treemap 坐标"""
+    board_type = request.args.get("type", "sector")
+    _log(f"GET /api/boards?type={board_type}")
+    try:
+        if board_type == "concept":
+            boards = board.fetch_concept_boards(30)
+        else:
+            boards = board.fetch_sector_boards(30)
+        boards = _compute_treemap(boards)
+        if not boards:
+            _log(f"/api/boards: {board_type} 板块数据为空")
+        else:
+            _log(f"/api/boards: Treemap坐标已计算, {board_type} {len(boards)} 个板块")
+        return jsonify({"type": board_type, "boards": boards, "count": len(boards)})
+    except Exception as e:
+        _log(f"/api/boards 异常: {e}")
+        return jsonify({"type": board_type, "boards": [], "count": 0, "error": str(e)}), 500
+
+
+@app.route("/api/board/<code>/stocks")
+def api_board_stocks(code):
+    """返回板块成分股 TOP 20（涨幅降序）"""
+    _log(f"GET /api/board/{code}/stocks")
+    try:
+        stocks = board.fetch_board_stocks(code, 20)
+        # 同步写入全局股票字典
+        for s in stocks:
+            data.upsert_stock(s["code"], name=s.get("name", ""), price=s.get("price", 0),
+                            change_pct=s.get("change_pct", 0), turnover=s.get("turnover", 0))
+        if not stocks:
+            _log(f"/api/board/{code}/stocks: 成分股数据为空")
+        else:
+            _log(f"/api/board/{code}/stocks: 返回 {len(stocks)} 只股票")
+        return jsonify({"code": code, "stocks": stocks, "count": len(stocks)})
+    except Exception as e:
+        _log(f"/api/board/{code}/stocks 异常: {e}")
+        return jsonify({"code": code, "stocks": [], "count": 0, "error": str(e)}), 500
+
+
+# ============== 自选股 API ==============
+
+@app.route("/api/watchlist")
+def api_watchlist():
+    """返回当前自选股 code 列表"""
+    codes = data.get_watchlist_codes()
+    return jsonify({"codes": codes, "count": len(codes)})
+
+
+@app.route("/api/watchlist/toggle", methods=["POST"])
+def api_watchlist_toggle():
+    """切换自选股状态：如果已在自选则移除，否则添加"""
+    payload = request.get_json(silent=True) or {}
+    code = (payload.get("code", "") or "").strip().lower()
+    if not code:
+        return jsonify({"ok": False, "error": "缺少 code"}), 400
+    codes = data.get_watchlist_codes()
+    if code in codes:
+        data.remove_from_watchlist(code)
+        _log(f"自选股 移除: {code}")
+        return jsonify({"ok": True, "code": code, "in_watchlist": False, "action": "removed"})
+    else:
+        data.add_to_watchlist(code)
+        info = data.get_stock(code)
+        if info.get("name"):
+            data.upsert_stock(code, name=info["name"])
+        _log(f"自选股 添加: {code}")
+        return jsonify({"ok": True, "code": code, "in_watchlist": True, "action": "added"})
+
+
+@app.route("/api/watchlist/stocks")
+def api_watchlist_stocks():
+    """返回自选股行情（从内存字典补全，含是否持仓判断）"""
+    codes = data.get_watchlist_codes()
+    positions_raw = pf.get_positions()
+    held_codes = {p["code"] for p in positions_raw}
+    stocks = []
+    for code in codes:
+        info = data.get_stock(code)
+        curr_price = info.get("price", 0)
+        change_pct = info.get("change_pct", 0)
+        stocks.append({
+            "code": code,
+            "name": info.get("name", code),
+            "price": round(curr_price, 2) if curr_price else 0,
+            "change_pct": round(change_pct, 2),
+            "sector": info.get("sector", ""),
+            "is_held": code in held_codes,
+        })
+    _log(f"自选股 行情 API: {len(stocks)} 只")
+    return jsonify({"stocks": stocks, "count": len(stocks)})
+
+
 # ============== 错误 ==============
 
 @app.errorhandler(404)
@@ -186,8 +334,9 @@ def server_error(e):
 # ============== 启动 ==============
 
 if __name__ == "__main__":
-    port = int(os.environ.get("RQUANT_PORT", "5060"))
-    print(f"🚀 rQuant 启动：http://localhost:{port}")
+    port = int(os.environ.get("RQUANT_PORT", "8080"))
+    print(f"rQuant 启动：http://localhost:{port}")
+    _log("日志系统已就绪，等待请求中…")
     try:
         from waitress import serve
         serve(app, host="0.0.0.0", port=port)

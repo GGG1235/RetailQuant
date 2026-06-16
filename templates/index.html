@@ -21,6 +21,33 @@
       {% endif %}
     {% endwith %}
 
+    <!-- 板块热力图 -->
+    <div class="box" id="treemap-box">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
+        <h2 style="margin:0;">🗺️ 板块热力图</h2>
+        <button class="tab-btn active" id="tab-sector" onclick="switchTab('sector')">行业板块</button>
+        <button class="tab-btn" id="tab-concept" onclick="switchTab('concept')">概念板块</button>
+        <span style="margin-left:auto;font-size:12px;color:#78909c;">矩形面积 ∝ 涨跌幅绝对值</span>
+      </div>
+      <div id="treemap-container" style="position:relative;">
+        <canvas id="treemap-canvas" width="900" height="500" style="display:block;border-radius:4px;max-width:100%;"></canvas>
+        <div id="treemap-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#78909c;font-size:14px;">加载中…</div>
+      </div>
+    </div>
+
+    <!-- 成分股弹窗 -->
+    <div id="stock-modal" class="modal" style="display:none;">
+      <div class="modal-content" style="max-width:500px;">
+        <h3 id="stock-modal-title" style="color:#00d4ff;margin-top:0;"></h3>
+        <table id="stock-modal-table" class="stock-table">
+          <thead><tr><th>代码</th><th>名称</th><th>涨幅</th><th>换手</th><th>操作</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p id="stock-modal-empty" style="color:#78909c;text-align:center;display:none;">暂无成分股数据</p>
+        <button type="button" onclick="closeStockModal()" class="btn" style="margin-top:12px;">关闭</button>
+      </div>
+    </div>
+
     <!-- 顶部卡片 -->
     <div class="cards">
       <div class="card">
@@ -86,8 +113,10 @@
       </div>
     </div>
 
+    <!-- 持仓 + 自选股 并排 -->
+    <div class="row" id="holdings-row">
     <!-- 持仓 -->
-    <div class="box">
+    <div class="box" id="positions-box">
       <h2>📦 当前持仓</h2>
       <button onclick="showAddForm()" class="btn">+ 添加</button>
       <div id="add-form" class="form" style="display:none;">
@@ -133,6 +162,41 @@
       {% endif %}
     </div>
 
+    <!-- 自选股 -->
+    <div class="box" id="watchlist-box">
+      <h2>⭐ 自选股 <span class="badge green" id="watchlist-badge">{{ watchlist_stocks|length }}</span></h2>
+      {% if watchlist_stocks %}
+      <table>
+        <thead>
+          <tr><th>代码</th><th>名称</th><th>现价</th><th>涨幅</th><th>板块</th><th>操作</th></tr>
+        </thead>
+        <tbody id="watchlist-tbody">
+          {% for w in watchlist_stocks %}
+          <tr>
+            <td><code>{{ w.code }}</code></td>
+            <td>{{ w.name }}</td>
+            <td>{% if w.price > 0 %}¥{{ "%.2f"|format(w.price) }}{% else %}—{% endif %}</td>
+            <td class="{% if w.change_pct > 0 %}green{% elif w.change_pct < 0 %}red{% endif %}">
+              {{ '{:+.2f}'.format(w.change_pct) }}%
+            </td>
+            <td>{{ w.sector }}</td>
+            <td>
+              {% if w.is_held %}
+              <span class="held-tag">已持仓</span>
+              {% else %}
+              <button type="button" onclick="showAddForCode('{{ w.code }}', {{ w.price }})" class="btn-primary btn-sm">买入</button>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <p class="empty" id="watchlist-empty">📭 暂无自选股，点击板块成分股旁的 + 添加</p>
+      {% endif %}
+    </div>
+    </div>
+
     <!-- 卖出弹窗 -->
     <div id="sell-modal" class="modal" style="display:none;">
       <div class="modal-content">
@@ -147,6 +211,7 @@
         </form>
       </div>
     </div>
+
 
     <!-- 交易历史 -->
     {% if trades %}
@@ -194,6 +259,300 @@
     updatePreview();
   }
   function closeSell() { document.getElementById('sell-modal').style.display = 'none'; }
+  // ========== Treemap 矩形树图 ==========
+
+  let treemapData = [];
+  let currentBoardType = 'sector';
+  let CANVAS_W = 900, CANVAS_H = 500;
+  const PADDING = 2, ASPECT = 900 / 500;
+
+  function switchTab(type) {
+    currentBoardType = type;
+    document.getElementById('tab-sector').classList.toggle('active', type === 'sector');
+    document.getElementById('tab-concept').classList.toggle('active', type === 'concept');
+    loadTreemap(type);
+  }
+
+  async function loadTreemap(type) {
+    console.log('[treemap] loadTreemap 被调用, type=' + type);
+    const loading = document.getElementById('treemap-loading');
+    if (!loading) { console.error('[treemap] loading 元素不存在'); return; }
+    loading.style.display = 'flex';
+    try {
+      const url = '/api/boards?type=' + type;
+      console.log('[treemap] 请求: ' + url);
+      const resp = await fetch(url);
+      console.log('[treemap] 响应状态: ' + resp.status);
+      const data = await resp.json();
+      console.log('[treemap] 数据 count: ' + data.count);
+      treemapData = data.boards || [];
+      if (treemapData.length === 0) {
+        loading.textContent = '暂无数据';
+        return;
+      }
+      drawTreemap(treemapData);
+      loading.style.display = 'none';
+    } catch (e) {
+      console.error('[treemap] 请求失败:', e.message || e);
+      loading.textContent = '加载失败，请刷新重试';
+    }
+  }
+
+  function drawTreemap(items) {
+    const canvas = document.getElementById('treemap-canvas');
+    const container = document.getElementById('treemap-container');
+    const dpr = window.devicePixelRatio || 1;
+    const containerW = container ? container.clientWidth : 900;
+    const scale = containerW / 900;  // 后端坐标基于 900×500
+    CANVAS_W = Math.floor(containerW * dpr);
+    CANVAS_H = Math.floor(CANVAS_W / ASPECT);
+    canvas.width = CANVAS_W;
+    canvas.height = CANVAS_H;
+    canvas.style.width = containerW + 'px';
+    canvas.style.height = Math.floor(containerW / ASPECT) + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+
+    // 按后端传来的 x, y, w, h 渲染（坐标是 900×500 基准，需缩放到实际 Canvas）
+    const rects = items.map(item => ({
+      x: item.x * scale * dpr,
+      y: item.y * scale * dpr,
+      w: item.w * scale * dpr,
+      h: item.h * scale * dpr,
+    }));
+
+    canvas._rects = rects;
+    canvas._items = items;
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const r = rects[i];
+      if (!r) continue;
+      const pct = item.change_pct || 0;
+      const absPct = Math.abs(pct);
+      const intensity = Math.min(absPct / 10, 1);
+      let rc, gc, bc;
+      if (pct >= 0) {
+        rc = Math.round(200 + 55 * intensity);
+        gc = Math.round(60 - 40 * intensity);
+        bc = Math.round(60 - 40 * intensity);
+      } else {
+        rc = Math.round(60 - 40 * intensity);
+        gc = Math.round(170 + 50 * intensity);
+        bc = Math.round(80 - 50 * intensity);
+      }
+      const rx = r.x + PADDING * dpr, ry = r.y + PADDING * dpr,
+            rw = Math.max(1, r.w - 2 * PADDING * dpr),
+            rh = Math.max(1, r.h - 2 * PADDING * dpr);
+
+      ctx.fillStyle = `rgb(${rc},${gc},${bc})`;
+      ctx.fillRect(rx, ry, rw, rh);
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+      ctx.lineWidth = 0.5 * dpr;
+      ctx.strokeRect(rx, ry, rw, rh);
+
+      const minW = 35 * dpr, minH = 22 * dpr;
+      if (rw > minW && rh > minH) {
+        const sign = pct >= 0 ? '+' : '';
+        const text1 = item.name.length > 4 ? item.name.slice(0, 4) + '…' : item.name;
+        const text2 = `${sign}${pct.toFixed(1)}%`;
+        const fontSize = Math.min(12 * dpr, Math.floor(rh / 4.5));
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${fontSize}px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const cx = rx + rw / 2;
+        const cy = rh > 40 * dpr ? ry + rh / 2 - 7 * dpr : ry + rh / 2;
+        ctx.fillText(text1, cx, cy);
+        if (rh > 40 * dpr) {
+          ctx.font = `${Math.min(11 * dpr, Math.floor(rh / 5))}px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`;
+          ctx.fillText(text2, cx, cy + 16 * dpr);
+        }
+      }
+    }
+  }
+
+  // Squarified Treemap 坐标由后端 Python squarify 库计算，前端不再需要此函数
+  function squarify(values, x, y, w, h) {
+    if (values.length === 0 || w <= 0 || h <= 0) return [];
+    const total = values.reduce((a, b) => a + b, 0);
+    if (total === 0) return [];
+
+    // {v, idx} 按值降序
+    const items = values.map((v, idx) => ({ v, idx }))
+                        .sort((a, b) => b.v - a.v);
+    const result = new Array(values.length);
+
+    function worstAspect(row, rowSum, sideLen) {
+      // sideLen: 行/列的固定边长度
+      let worst = 0;
+      for (const it of row) {
+        const s = (it.v / rowSum) * sideLen;
+        const ar = Math.max(s / sideLen, sideLen / s);
+        if (ar > worst) worst = ar;
+      }
+      return worst;
+    }
+
+    function layoutRow(row, rowSum, totalSum, x0, y0, rw, rh, isRow) {
+      const rowArea = (rowSum / totalSum) * rw * rh;
+      if (isRow) {
+        // 行：固定高度=rw(短边), 宽度按比例
+        const rowHeight = rowArea / rw;
+        let pos = 0;
+        for (const it of row) {
+          const wd = (it.v / rowSum) * rw;
+          result[it.idx] = { x: x0 + pos, y: y0, w: wd, h: rowHeight };
+          pos += wd;
+        }
+        return rowHeight; // 消耗的高度
+      } else {
+        // 列：固定宽度=rh(短边), 高度按比例
+        const rowWidth = rowArea / rh;
+        let pos = 0;
+        for (const it of row) {
+          const ht = (it.v / rowSum) * rh;
+          result[it.idx] = { x: x0, y: y0 + pos, w: rowWidth, h: ht };
+          pos += ht;
+        }
+        return rowWidth; // 消耗的宽度
+      }
+    }
+
+    let offsetX = x, offsetY = y;
+    let remW = w, remH = h;
+    let idx = 0;
+
+    while (idx < items.length) {
+      const isRow = remW >= remH;
+      const fixedSide = isRow ? remW : remH;  // 行则宽固定，列则高固定
+
+      // 贪心：尽量多塞入当前行/列直到宽高比变差
+      let row = [];
+      let rowSum = 0;
+      let bestAspect = Infinity;
+
+      while (idx < items.length) {
+        const testRow = [...row, items[idx]];
+        const testSum = rowSum + items[idx].v;
+        const rowLen = (testSum / total) * remW * remH / fixedSide;
+        const aspect = worstAspect(testRow, testSum, rowLen);
+
+        if (aspect > bestAspect && row.length > 0) break;
+
+        row = testRow;
+        rowSum = testSum;
+        bestAspect = aspect;
+        idx++;
+      }
+
+      // 布局这一行/列
+      const consumed = layoutRow(row, rowSum, total, offsetX, offsetY, remW, remH, isRow);
+      if (isRow) {
+        offsetY += consumed;
+        remH -= consumed;
+      } else {
+        offsetX += consumed;
+        remW -= consumed;
+      }
+    }
+
+    return result;
+  }
+
+  // Canvas 鼠标事件
+  document.addEventListener('DOMContentLoaded', () => {
+    const canvas = document.getElementById('treemap-canvas');
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = CANVAS_W / rect.width;
+      const scaleY = CANVAS_H / rect.height;
+      const mx = (e.clientX - rect.left) * scaleX;
+      const my = (e.clientY - rect.top) * scaleY;
+
+      canvas.style.cursor = 'default';
+      if (canvas._rects && canvas._items) {
+        for (let i = 0; i < canvas._rects.length; i++) {
+          const r = canvas._rects[i];
+          if (mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h) {
+            canvas.style.cursor = 'pointer';
+            break;
+          }
+        }
+      }
+    });
+
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = CANVAS_W / rect.width;
+      const scaleY = CANVAS_H / rect.height;
+      const mx = (e.clientX - rect.left) * scaleX;
+      const my = (e.clientY - rect.top) * scaleY;
+
+      if (canvas._rects && canvas._items) {
+        for (let i = 0; i < canvas._rects.length; i++) {
+          const r = canvas._rects[i];
+          if (mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h) {
+            const item = canvas._items[i];
+            showStocks(item.code, item.name);
+            break;
+          }
+        }
+      }
+    });
+  });
+
+  // 成分股弹窗
+  async function showStocks(code, name) {
+    const modal = document.getElementById('stock-modal');
+    const title = document.getElementById('stock-modal-title');
+    const tbody = document.getElementById('stock-modal-table').querySelector('tbody');
+    const empty = document.getElementById('stock-modal-empty');
+
+    title.textContent = `📋 ${name} (${code}) 成分股`;
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#78909c;">加载中…</td></tr>';
+    empty.style.display = 'none';
+    modal.style.display = 'flex';
+
+    try {
+      const resp = await fetch('/api/board/' + code + '/stocks');
+      const data = await resp.json();
+      const stocks = data.stocks || [];
+      if (stocks.length === 0) {
+        tbody.innerHTML = '';
+        empty.style.display = 'block';
+        return;
+      }
+      tbody.innerHTML = stocks.map(s => {
+        const pct = s.change_pct || 0;
+        const color = pct >= 0 ? '#00e676' : '#ff5252';
+        const sign = pct >= 0 ? '+' : '';
+        const inWL = watchlistCodes.has(s.code);
+        const btnClass = inWL ? 'btn-wl-remove' : 'btn-wl-add';
+        const btnLabel = inWL ? '\u2212' : '+';
+        return `<tr>
+          <td><code>${s.code}</code></td>
+          <td>${s.name}</td>
+          <td style="color:${color}">${sign}${pct.toFixed(2)}%</td>
+          <td>${(s.turnover || 0).toFixed(1)}%</td>
+          <td><button class="${btnClass}" onclick="toggleWatchlist('${s.code}', this)" title="${inWL ? '移出自选' : '加入自选'}">${btnLabel}</button></td>
+        </tr>`;
+      }).join('');
+    } catch (e) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#ff5252;">加载失败</td></tr>';
+    }
+  }
+  function closeStockModal() {
+    document.getElementById('stock-modal').style.display = 'none';
+  }
+
+  // 页面加载时拉取板块数据
+  console.log('[treemap] 启动加载，当前模式: sector');
+  loadTreemap('sector');
+
+  // ========== 原有卖出弹窗 ==========
+
   function updatePreview() {
     const price = parseFloat(document.getElementById('sell-price-input').value) || 0;
     const shares = parseInt(document.getElementById('sell-shares-input').value) || 0;
@@ -207,6 +566,83 @@
     if (!confirm('确认删除交易 ' + id + '？')) return;
     fetch('/trade/delete/' + id, { method: 'POST' })
       .then(() => location.reload());
+  }
+
+  // ========== 自选股 ==========
+
+  let watchlistCodes = new Set({{ watchlist_codes|tojson }});
+  // 页面加载时获取最新自选股行情（填补无服务端渲染数据的股票）
+  reloadWatchlist();
+
+  async function toggleWatchlist(code, btn) {
+    try {
+      const resp = await fetch('/api/watchlist/toggle', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({code: code})
+      });
+      const data = await resp.json();
+      if (!data.ok) return;
+      if (data.in_watchlist) {
+        watchlistCodes.add(code);
+        btn.className = 'btn-wl-remove';
+        btn.textContent = '\u2212';
+        btn.title = '移出自选';
+      } else {
+        watchlistCodes.delete(code);
+        btn.className = 'btn-wl-add';
+        btn.textContent = '+';
+        btn.title = '加入自选';
+      }
+      reloadWatchlist();
+    } catch (e) {
+      console.error('Toggle watchlist failed:', e);
+    }
+  }
+
+  async function reloadWatchlist() {
+    try {
+      const resp = await fetch('/api/watchlist/stocks');
+      const data = await resp.json();
+      const stocks = data.stocks || [];
+      const badge = document.getElementById('watchlist-badge');
+      const tbody = document.getElementById('watchlist-tbody');
+      const empty = document.getElementById('watchlist-empty');
+      if (badge) badge.textContent = stocks.length;
+      if (stocks.length === 0) {
+        if (tbody) tbody.innerHTML = '';
+        if (empty) empty.style.display = 'block';
+        return;
+      }
+      if (empty) empty.style.display = 'none';
+      if (tbody) {
+        tbody.innerHTML = stocks.map(w => {
+          const pct = w.change_pct || 0;
+          const color = pct >= 0 ? 'green' : 'red';
+          const sign = pct >= 0 ? '+' : '';
+          const action = w.is_held
+            ? '<span class="held-tag">已持仓</span>'
+            : `<button type="button" onclick="showAddForCode('${w.code}', ${w.price})" class="btn-primary btn-sm">买入</button>`;
+          return `<tr>
+            <td><code>${w.code}</code></td>
+            <td>${w.name}</td>
+            <td>${w.price > 0 ? '¥' + w.price.toFixed(2) : '—'}</td>
+            <td class="${color}">${sign}${pct.toFixed(2)}%</td>
+            <td>${w.sector}</td>
+            <td>${action}</td>
+          </tr>`;
+        }).join('');
+      }
+    } catch (e) {
+      console.error('reloadWatchlist failed:', e);
+    }
+  }
+
+  function showAddForCode(code, price) {
+    document.getElementById('add-form').style.display = 'block';
+    document.querySelector('#add-form input[name="code"]').value = code;
+    if (price > 0) document.querySelector('#add-form input[name="price"]').value = price.toFixed(2);
+    document.querySelector('#add-form input[name="shares"]').focus();
   }
   </script>
 </body>

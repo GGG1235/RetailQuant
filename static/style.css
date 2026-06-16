@@ -176,3 +176,71 @@ td.red { color: #ff5252; }
 .error-page h1 { font-size: 72px; color: #ff5252; margin: 0 0 16px 0; }
 .error-page p { color: #b0bec5; font-size: 18px; }
 .error-page a { color: #00d4ff; text-decoration: none; }
+
+/* ====== Treemap 板块热力图 ====== */
+
+#treemap-container {
+  min-height: 200px;
+}
+
+.tab-btn {
+  padding: 6px 14px;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 4px;
+  background: rgba(255,255,255,0.05);
+  color: #78909c;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+.tab-btn:hover { border-color: rgba(0,212,255,0.4); color: #00d4ff; }
+.tab-btn.active {
+  background: rgba(0,212,255,0.15);
+  border-color: #00d4ff;
+  color: #00d4ff;
+  font-weight: 600;
+}
+
+.stock-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+.stock-table th, .stock-table td {
+  padding: 6px 10px;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.stock-table th { color: #78909c; font-weight: 500; }
+.stock-table td { color: #b0bec5; }
+.stock-table code { font-size: 12px; }
+
+/* ====== 自选股切换按钮 ====== */
+
+.btn-wl-add {
+  background: rgba(0, 212, 255, 0.12);
+  color: #00d4ff;
+  border: 1px solid rgba(0, 212, 255, 0.25);
+  border-radius: 50%;
+  width: 24px; height: 24px;
+  font-size: 16px; font-weight: 700;
+  cursor: pointer;
+  line-height: 20px;
+  text-align: center;
+  padding: 0;
+}
+.btn-wl-remove {
+  background: rgba(255, 82, 82, 0.12);
+  color: #ff5252;
+  border: 1px solid rgba(255, 82, 82, 0.25);
+  border-radius: 50%;
+  width: 24px; height: 24px;
+  font-size: 16px; font-weight: 700;
+  cursor: pointer;
+  line-height: 20px;
+  text-align: center;
+  padding: 0;
+}
+.btn-wl-add:hover, .btn-wl-remove:hover { opacity: 0.8; }
+.held-tag { font-size: 12px; color: #78909c; padding: 2px 8px; background: rgba(255,255,255,0.05); border-radius: 4px; }
+.btn-sm { padding: 6px 12px; font-size: 12px; }

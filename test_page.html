@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>rQuant · 2026-06-16</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <span class="logo">📊 rQuant</span>
+    <span class="date">2026-06-16</span>
+    <button onclick="location.reload()" class="btn-sm">🔄 刷新</button>
+  </nav>
+
+  <div class="container">
+    
+      
+    
+
+    <!-- 顶部卡片 -->
+    <div class="cards">
+      <div class="card">
+        <div class="label">总成本</div>
+        <div class="value">¥0</div>
+      </div>
+      <div class="card">
+        <div class="label">总市值</div>
+        <div class="value">¥0</div>
+      </div>
+      <div class="card ">
+        <div class="label">总盈亏</div>
+        <div class="value">
+          +0
+          <span class="pct">(+0.00%)</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="label">持仓数</div>
+        <div class="value">0</div>
+      </div>
+    </div>
+
+    <!-- 信号区 -->
+    <div class="row">
+      <div class="box">
+        <h2>📉 卖出提示 <span class="badge red">0</span></h2>
+        
+          <p class="empty">✅ 无（持仓健康）</p>
+        
+      </div>
+
+      <div class="box">
+        <h2>🔥 买入信号 <span class="badge green">2</span></h2>
+        
+          
+          <div class="signal">
+            <div class="sig-head">
+              <span><b>sh600460</b> 士兰微 · 半导体</span>
+              <span class="strat-tag">ChanLun2B</span>
+            </div>
+            <div class="sig-reason">站上 MA5(33.79) + MA5&gt;MA20(33.78)</div>
+            <div class="sig-detail">
+              现价 ¥35.37 → 买 ¥35.55
+              · 止损 ¥33.06 · 止盈 ¥40.88
+            </div>
+          </div>
+          
+          <div class="signal">
+            <div class="sig-head">
+              <span><b>sh600519</b> 贵州茅台 · 消费</span>
+              <span class="strat-tag">BuyHold</span>
+            </div>
+            <div class="sig-reason">现价 ¥1271.10 &lt; MA60×0.95（¥1304.17）</div>
+            <div class="sig-detail">
+              现价 ¥1271.10 → 买 ¥1277.46
+              · 止损 ¥1143.99 · 止盈 ¥1525.32
+            </div>
+          </div>
+          
+        
+      </div>
+    </div>
+
+    <!-- 持仓 -->
+    <div class="box">
+      <h2>📦 当前持仓</h2>
+      <button onclick="showAddForm()" class="btn">+ 添加</button>
+      <div id="add-form" class="form" style="display:none;">
+        <form method="POST" action="/position/add">
+          <input type="text" name="code" placeholder="代码 sh600460" required pattern="(sh|sz)\d{6}">
+          <input type="number" name="shares" placeholder="股数（100整数倍）" required min="100" step="100">
+          <input type="number" name="price" placeholder="价格" required step="0.01" min="0.01">
+          <button type="submit" class="btn-primary">买入</button>
+          <button type="button" onclick="hideAddForm()" class="btn">取消</button>
+        </form>
+      </div>
+
+      
+        <p class="empty">📭 暂无持仓</p>
+      
+    </div>
+
+    <!-- 卖出弹窗 -->
+    <div id="sell-modal" class="modal" style="display:none;">
+      <div class="modal-content">
+        <h3>🔴 卖出 <span id="sell-code"></span></h3>
+        <p style="color:#888;">持仓: <span id="sell-held"></span> 股 · 现价: ¥<span id="sell-price"></span></p>
+        <form method="POST" id="sell-form" action="">
+          <label>卖出价格 <input type="number" name="price" id="sell-price-input" step="0.01" required></label>
+          <label>卖出股数 <input type="number" name="shares" id="sell-shares-input" min="100" step="100" required></label>
+          <div id="sell-preview" style="background:#1a1a2e;padding:10px;border-radius:4px;margin:10px 0;"></div>
+          <button type="submit" class="btn-primary">确认卖出</button>
+          <button type="button" onclick="closeSell()" class="btn">取消</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- 交易历史 -->
+    
+  </div>
+
+  <script>
+  function showAddForm() { document.getElementById('add-form').style.display = 'block'; }
+  function hideAddForm() { document.getElementById('add-form').style.display = 'none'; }
+
+  function showSellForm(code, held, currentPrice) {
+    document.getElementById('sell-code').textContent = code;
+    document.getElementById('sell-held').textContent = held;
+    document.getElementById('sell-price').textContent = currentPrice.toFixed(2);
+    document.getElementById('sell-price-input').value = currentPrice.toFixed(2);
+    document.getElementById('sell-shares-input').value = held;
+    document.getElementById('sell-shares-input').max = held;
+    document.getElementById('sell-form').action = '/position/sell/' + code;
+    document.getElementById('sell-modal').style.display = 'flex';
+    updatePreview();
+  }
+  function closeSell() { document.getElementById('sell-modal').style.display = 'none'; }
+  function updatePreview() {
+    const price = parseFloat(document.getElementById('sell-price-input').value) || 0;
+    const shares = parseInt(document.getElementById('sell-shares-input').value) || 0;
+    const proceeds = (price * shares).toFixed(0);
+    document.getElementById('sell-preview').innerHTML = `卖出金额: ¥${proceeds}（含手续费印花税约 ¥${(proceeds*0.00125).toFixed(0)}）`;
+  }
+  document.getElementById('sell-price-input').oninput = updatePreview;
+  document.getElementById('sell-shares-input').oninput = updatePreview;
+
+  function deleteTrade(id) {
+    if (!confirm('确认删除交易 ' + id + '？')) return;
+    fetch('/trade/delete/' + id, { method: 'POST' })
+      .then(() => location.reload());
+  }
+  </script>
+</body>
+</html>
