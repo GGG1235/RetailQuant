@@ -5,6 +5,7 @@ rquant.business.data — 业务数据层（精简版）
 - _stock_store 仍是"已查看过的股票临时信息"（含 name/price/change_pct/turnover），
   用于前端 watchlist 视图补全；与 pool 解耦
 """
+
 from __future__ import annotations
 import json
 import time
