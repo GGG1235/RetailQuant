@@ -3,7 +3,7 @@ rquant.board — 板块行情业务层
 - 数据源：东方财富 push2 接口（行业 / 概念 / 地域板块）
 - 直接拉真实板块数据（板块名/涨跌幅/领涨股/股票数）
 - 不再使用 ETF 代理板块
-- 业务层缓存 2 分钟
+- 业务层缓存 2 分钟（serve-stale：拉取失败时用过期缓存顶上）
 - 对外 API：fetch_sector_boards / fetch_concept_boards / fetch_board_stocks
 """
 
@@ -13,10 +13,12 @@ import time
 from datetime import datetime
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # ============== 数据源（东方财富 push2）==============
 
-EAST_MONEY_URL = "https://push2.eastmoney.com/api/qt/clist/get"
+EAST_MONEY_URL = "https://push2delay.eastmoney.com/api/qt/clist/get"
 # 板块类型 → 东财 fs 过滤
 # m:90 = 板块市场；t:2=行业，t:3=概念，t:1=地域
 BOARD_TYPES = {
@@ -27,7 +29,7 @@ BOARD_TYPES = {
 # 板块 code 前缀（前端透传用，避免与个股 sh/sz 冲突）
 BOARD_CODE_PREFIX = "bk_"
 
-# 复用 session（连接池）
+# 复用 session（连接池）+ 自动重试（应对东财偶发断连）
 _session = requests.Session()
 _session.headers.update(
     {
@@ -38,10 +40,22 @@ _session.headers.update(
 # 关键：忽略 HTTP_PROXY/HTTPS_PROXY 等环境变量（直连，避免被系统代理污染）
 _session.trust_env = False
 
-# ============== 业务层缓存 ==============
+# 自动重试：3 次，backoff 0.5/1.0/2.0 秒，只重试可恢复的错
+_retry = Retry(
+    total=3,
+    backoff_factor=0.5,
+    status_forcelist=(500, 502, 503, 504),
+    allowed_methods=frozenset(["GET"]),
+    raise_on_status=False,
+)
+_adapter = HTTPAdapter(max_retries=_retry, pool_connections=4, pool_maxsize=8)
+_session.mount("https://", _adapter)
+_session.mount("http://", _adapter)
 
-CACHE_TTL = 120  # 秒（盘中快刷）
+# ============== 业务层缓存（serve-stale）==============
 
+CACHE_TTL = 120  # 秒（新鲜窗口）
+STALE_TTL = 600  # 秒（过期后还能用 10 分钟，serve-stale 兜底）
 _cache: dict[str, tuple] = {}  # key → (data, timestamp)
 
 
@@ -51,12 +65,20 @@ def _log(msg: str):
     sys.stderr.flush()
 
 
-def _cached(key: str):
+def _cached(key: str, allow_stale: bool = False):
+    """读缓存。
+
+    allow_stale=False → 只返回新鲜数据
+    allow_stale=True  → 新鲜优先；没有则返回过期但仍在 STALE_TTL 内的数据（兜底）
+    """
     item = _cache.get(key)
     if item is None:
         return None
     data, ts = item
-    if time.time() - ts < CACHE_TTL:
+    age = time.time() - ts
+    if age < CACHE_TTL:
+        return data
+    if allow_stale and age < STALE_TTL:
         return data
     return None
 
@@ -95,15 +117,15 @@ def _fetch_boards(board_type: str, top_n: int) -> list[dict]:
         r = _session.get(EAST_MONEY_URL, params=params, timeout=8)
         if r.status_code != 200:
             _log(f"{board_type} 板块: HTTP {r.status_code}")
-            return []
+            return _serve_stale(cache_key, board_type, top_n)
         payload = r.json()
         diff = (payload.get("data") or {}).get("diff") or {}
         if not diff:
             _log(f"{board_type} 板块: 数据为空")
-            return []
+            return _serve_stale(cache_key, board_type, top_n)
     except Exception as e:
         _log(f"{board_type} 板块: 拉取失败 {e}")
-        return []
+        return _serve_stale(cache_key, board_type, top_n)
 
     rows: list[dict] = []
     for item in diff.values():
@@ -125,6 +147,15 @@ def _fetch_boards(board_type: str, top_n: int) -> list[dict]:
     _log(f"{board_type} 板块: 刷新完成, {len(rows)} 个")
     _set_cache(cache_key, rows)
     return rows[:top_n]
+
+
+def _serve_stale(cache_key: str, board_type: str, top_n: int) -> list[dict]:
+    """拉取失败时兜底：返回过期但未超过 STALE_TTL 的旧数据"""
+    stale = _cached(cache_key, allow_stale=True)
+    if stale is not None:
+        _log(f"{board_type} 板块: 远端失败，回退 stale 缓存 ({len(stale)} 条)")
+        return stale[:top_n]
+    return []
 
 
 def fetch_sector_boards(top_n: int = 30) -> list[dict]:
@@ -192,15 +223,15 @@ def _fetch_board_stocks(board_code: str, top_n: int) -> list[dict]:
         r = _session.get(EAST_MONEY_URL, params=params, timeout=8)
         if r.status_code != 200:
             _log(f"成分股 {raw_code}: HTTP {r.status_code}")
-            return []
+            return _serve_stale_stocks(cache_key, raw_code, top_n)
         payload = r.json()
         diff = (payload.get("data") or {}).get("diff") or {}
         if not diff:
             _log(f"成分股 {raw_code}: 数据为空")
-            return []
+            return _serve_stale_stocks(cache_key, raw_code, top_n)
     except Exception as e:
         _log(f"成分股 {raw_code}: 拉取失败 {e}")
-        return []
+        return _serve_stale_stocks(cache_key, raw_code, top_n)
 
     rows: list[dict] = []
     for item in diff.values():
@@ -222,6 +253,15 @@ def _fetch_board_stocks(board_code: str, top_n: int) -> list[dict]:
     _log(f"成分股 {raw_code}: 刷新完成, {len(rows)} 只")
     _set_cache(cache_key, rows)
     return rows[:top_n]
+
+
+def _serve_stale_stocks(cache_key: str, raw_code: str, top_n: int) -> list[dict]:
+    """成分股拉取失败时兜底"""
+    stale = _cached(cache_key, allow_stale=True)
+    if stale is not None:
+        _log(f"成分股 {raw_code}: 远端失败，回退 stale 缓存 ({len(stale)} 条)")
+        return stale[:top_n]
+    return []
 
 
 def fetch_board_stocks(board_code: str, top_n: int = 20) -> list[dict]:
