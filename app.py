@@ -86,6 +86,10 @@ def index():
     _log("首页被访问 —— 如果你看到这行，说明浏览器确实连接到了服务器")
     positions_raw = pf.get_positions()
 
+    # 0. 预填充自选股行情（批量拉取，带 5 分钟缓存）
+    watchlist_codes = data.get_watchlist_codes()
+    data.populate_watchlist_info(watchlist_codes)
+
     # 1. 持仓（市值 / 盈亏）
     positions = []
     total_cost = 0.0
@@ -126,7 +130,6 @@ def index():
     # 4. 交易历史 + 5. 自选股视图
     trades = sorted(pf.list_trades(), key=lambda x: x["datetime"], reverse=True)
     snapshots = sorted(pf.list_snapshots(), key=lambda x: x["date"])
-    watchlist_codes = data.get_watchlist_codes()
     watchlist_stocks = _build_watchlist_view(watchlist_codes, positions_raw)
 
     return render_template(
@@ -362,6 +365,7 @@ def _ensure_stock_info(code: str) -> bool:
 def api_watchlist_stocks():
     """返回自选股行情（从内存字典补全，含是否持仓判断）"""
     codes = data.get_watchlist_codes()
+    data.populate_watchlist_info(codes)
     rows = _build_watchlist_view(codes, pf.get_positions())
     _log(f"自选股 行情 API: {len(rows)} 只")
     return jsonify({"stocks": rows, "count": len(rows)})
