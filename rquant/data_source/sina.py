@@ -1,70 +1,112 @@
 """
 rquant.data_source.sina — Sina 数据源实现
-- SinaKlineSource: K 线 + 本地 JSON 缓存
-- SinaQuoteSource: 实时行情 + 30s 批量缓存
+- SinaKlineSource: K 线 + SQLite 缓存（走 db.py）
+- SinaQuoteSource: 实时行情 + 进程内 QuoteCache（30s TTL）
+- 大盘指数复用 K 线源（sh000001 等）
 """
 
 from __future__ import annotations
-import json
 import re
 import time
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
+from . import db
 from .cache import (
-    CACHE_DIR,
     DEFAULT_TIMEOUT,
     SINA_HEADERS,
     SINA_KLINE_URL,
     SINA_QUOTE_URL,
-    STALE_DAYS,
     UNHEALTHY_COOLDOWN,
 )
+from .quote_cache import quote_cache
 
 
 # ============== K 线源 ==============
 
 
 class SinaKlineSource:
-    """Sina K 线源 + 本地 JSON 缓存"""
+    """Sina K 线源 + SQLite 缓存"""
 
     name = "sina_kline"
 
-    def __init__(self, cache_dir: Path = CACHE_DIR, timeout: int = DEFAULT_TIMEOUT):
-        self.cache_dir = cache_dir
+    def __init__(self, timeout: int = DEFAULT_TIMEOUT):
         self.timeout = timeout
         self._unhealthy_until = 0.0
 
-    def _cache_path(self, code: str) -> Path:
-        return self.cache_dir / f"{code}.json"
+    # ----- 缓存读 -----
 
-    def _read_cache(self, code: str) -> list[dict]:
-        p = self._cache_path(code)
-        if not p.exists():
-            return []
-        try:
-            return json.loads(p.read_text())
-        except Exception:
-            return []
+    def _read_cache(self, code: str, days: int) -> list[dict]:
+        """从 SQLite 读最近 days 天的缓存"""
+        rows = db.query_all(
+            "SELECT date, open, high, low, close, volume FROM klines WHERE code = ? ORDER BY date DESC LIMIT ?",
+            (code, days),
+        )
+        # 翻成正序（老→新），与原 JSON 行为一致
+        return [
+            {
+                "day": r["date"],
+                "open": r["open"],
+                "high": r["high"],
+                "low": r["low"],
+                "close": r["close"],
+                "volume": r["volume"],
+            }
+            for r in reversed(rows)
+        ]
 
-    def _write_cache(self, code: str, rows: list[dict]) -> None:
-        self._cache_path(code).write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    def _last_date(self, code: str) -> Optional[str]:
+        row = db.query_one(
+            "SELECT date FROM klines WHERE code = ? ORDER BY date DESC LIMIT 1",
+            (code,),
+        )
+        return row["date"] if row else None
 
-    def _need_refresh(self, cached: list[dict]) -> bool:
-        if not cached:
+    # ----- 缓存写 -----
+
+    def _upsert(self, code: str, rows: list[dict]) -> None:
+        """批量 UPSERT（INSERT OR REPLACE）"""
+        now = time.time()
+        seq = [
+            (code, r.get("day"), r.get("open"), r.get("high"), r.get("low"), r.get("close"), r.get("volume"), now)
+            for r in rows
+            if r.get("day")
+        ]
+        db.executemany(
+            "INSERT OR REPLACE INTO klines"
+            "(code, date, open, high, low, close, volume, fetched_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            seq,
+        )
+
+    def _need_refresh(self, code: str) -> bool:
+        """判断是否需要重新拉远端：缓存为空 / 最后一天距今 >= 2 个交易日"""
+        last = self._last_date(code)
+        if not last:
             return True
         try:
-            last_dt = datetime.strptime(cached[-1].get("day", ""), "%Y-%m-%d")
-            return (datetime.now() - last_dt).days >= STALE_DAYS
+            last_dt = datetime.strptime(last, "%Y-%m-%d").date()
+            # 取最后缓存日的"fetched_at"：超过 6 小时强制重拉（防停牌日 / 周末假数据）
+            row = db.query_one(
+                "SELECT fetched_at FROM klines WHERE code = ? AND date = ?",
+                (code, last),
+            )
+            if row and (time.time() - row["fetched_at"]) > 6 * 3600:
+                return True
+            delta = (datetime.now().date() - last_dt).days
+            # 2 天阈值：周末 / 节假日不浪费请求
+            return delta >= 2
         except ValueError:
             return True
 
+    # ----- 主入口 -----
+
     def fetch(self, code: str, days: int = 250) -> list[dict]:
-        """拉 K 线 + JSON 缓存。返回原始行（{day, open, high, low, close, volume}）。"""
-        cached = self._read_cache(code)
-        if not self._need_refresh(cached):
-            return cached[-days:]
+        """拉 K 线 + SQLite 缓存。返回原始行（{day, open, high, low, close, volume}）。"""
+        cached = self._read_cache(code, days)
+
+        if not self._need_refresh(code):
+            return cached
 
         try:
             url = f"{SINA_KLINE_URL}?symbol={code}&scale=240&ma=no&datalen={days}"
@@ -72,19 +114,13 @@ class SinaKlineSource:
             if r.status_code == 200 and r.text.strip():
                 fresh = r.json()
                 if isinstance(fresh, list) and fresh:
-                    existing_dates = {x.get("day") for x in cached}
-                    merged = list(cached)
-                    for row in fresh:
-                        if row.get("day") not in existing_dates:
-                            merged.append(row)
-                    merged.sort(key=lambda x: x.get("day", ""))
-                    merged = merged[-days:]
-                    self._write_cache(code, merged)
+                    self._upsert(code, fresh)
                     self._unhealthy_until = 0.0
-                    return merged
+                    return self._read_cache(code, days)
         except Exception:
             self._unhealthy_until = time.time() + UNHEALTHY_COOLDOWN
-        return cached[-days:] if cached else []
+
+        return cached
 
     def healthy(self) -> bool:
         return time.time() > self._unhealthy_until
@@ -94,47 +130,60 @@ class SinaKlineSource:
 
 
 class SinaQuoteSource:
-    """Sina 实时行情源 + 短窗口批量缓存（防限流）"""
+    """Sina 实时行情源 + QuoteCache（30s TTL）+ 击穿保护"""
 
     name = "sina_quote"
-    BATCH_TTL = 30.0  # 同 code 复用窗口（秒）
 
     def __init__(self, timeout: int = DEFAULT_TIMEOUT):
         self.timeout = timeout
         self._unhealthy_until = 0.0
-        self._batch_cache: dict[str, tuple[dict, float]] = {}  # code -> (data, ts)
-
-    def fetch_batch(self, codes: list[str]) -> dict[str, dict]:
-        """批量拉行情，返回 {code: {...}}。已拉过且未过期的 code 复用。"""
-        if not codes:
-            return {}
-        now = time.time()
-        result: dict[str, dict] = {}
-        to_fetch: list[str] = []
-        for c in codes:
-            cached = self._batch_cache.get(c)
-            if cached and now - cached[1] < self.BATCH_TTL:
-                result[c] = cached[0]
-            else:
-                to_fetch.append(c)
-
-        if to_fetch:
-            try:
-                url = SINA_QUOTE_URL + ",".join(to_fetch)
-                r = __import__("requests").get(url, headers=SINA_HEADERS, timeout=self.timeout)
-                if r.status_code == 200:
-                    for c in to_fetch:
-                        item = self._parse_line(c, r.text)
-                        if item is not None:
-                            self._batch_cache[c] = (item, now)
-                            result[c] = item
-                    self._unhealthy_until = 0.0
-            except Exception:
-                self._unhealthy_until = time.time() + UNHEALTHY_COOLDOWN
-        return result
 
     def fetch(self, code: str) -> Optional[dict]:
         return self.fetch_batch([code]).get(code)
+
+    def fetch_batch(self, codes: list[str]) -> dict[str, dict]:
+        """批量拉行情：先查 QuoteCache，miss 的再发请求（带击穿保护）"""
+        if not codes:
+            return {}
+
+        result: dict[str, dict] = {}
+        to_fetch: list[str] = []
+        for c in codes:
+            cached = quote_cache.get(c)
+            if cached is not None:
+                result[c] = cached
+            else:
+                to_fetch.append(c)
+
+        if not to_fetch:
+            return result
+
+        # 击穿合并：去掉 inflight 的
+        need_network: list[str] = []
+        for c in to_fetch:
+            if quote_cache.acquire_inflight(c):
+                need_network.append(c)
+
+        if not need_network:
+            return result
+
+        try:
+            url = SINA_QUOTE_URL + ",".join(need_network)
+            r = __import__("requests").get(url, headers=SINA_HEADERS, timeout=self.timeout)
+            if r.status_code == 200:
+                for c in need_network:
+                    item = self._parse_line(c, r.text)
+                    if item is not None:
+                        quote_cache.put(c, item)
+                        result[c] = item
+                self._unhealthy_until = 0.0
+        except Exception:
+            self._unhealthy_until = time.time() + UNHEALTHY_COOLDOWN
+        finally:
+            for c in need_network:
+                quote_cache.release_inflight(c)
+
+        return result
 
     def _parse_line(self, code: str, text: str) -> Optional[dict]:
         m = re.search(rf'var hq_str_{code}="([^"]*)"', text)

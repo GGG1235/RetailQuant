@@ -17,7 +17,7 @@ from flask import (
     url_for,
 )
 
-from rquant.business import board, data, portfolio as pf
+from rquant.business import board, data, portfolio as pf, system
 from rquant.strategy import all_strategies, scan_sell, scan_stock
 
 from .views import (
@@ -70,7 +70,16 @@ def register_routes(app: Flask) -> None:
             df = data.fetch_kline(p["code"], 70)
             sig = scan_sell(p, df)
             if sig:
-                sell_signals.append({**sig, "code": p["code"], "name": p["name"]})
+                sell_signals.append(
+                    {
+                        **sig,
+                        "code": p["code"],
+                        "name": p["name"],
+                        "current_price": p.get("current_price", 0),
+                        "avg_cost": p.get("avg_cost", 0),
+                        "shares": p.get("shares", 0),
+                    }
+                )
 
         # 3. 买入信号（扫整个池）
         buy_signals: list[dict] = []
@@ -97,6 +106,7 @@ def register_routes(app: Flask) -> None:
         trades = sorted(pf.list_trades(), key=lambda x: x["datetime"], reverse=True)
         snapshots = sorted(pf.list_snapshots(), key=lambda x: x["date"])
         watchlist_codes = data.get_watchlist_codes()
+        data.populate_watchlist_info(watchlist_codes)
         watchlist_stocks = _build_watchlist_view(watchlist_codes, positions_raw)
 
         # 6. 策略列表（按大类分组，前端下拉框用）
@@ -283,3 +293,20 @@ def register_routes(app: Flask) -> None:
     @app.errorhandler(500)
     def server_error(e):
         return render_template("error.html", code=500, message=str(e)), 500
+
+    # ============== 系统状态 API（参考图新增） ==============
+
+    @app.route("/api/market_status")
+    def api_market_status():
+        """A 股市场状态（开/休/午休）"""
+        return jsonify(system.get_market_status())
+
+    @app.route("/api/strategy_status")
+    def api_strategy_status():
+        """所有策略的运行时状态（当前为 mock，详见 TODOLIST.md）"""
+        return jsonify({"strategies": system.get_strategy_status()})
+
+    @app.route("/api/system_log")
+    def api_system_log():
+        """系统日志（最近 50 条，从内存 ring buffer 读）"""
+        return jsonify({"logs": system.get_system_log(limit=50)})
