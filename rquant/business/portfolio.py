@@ -1,5 +1,5 @@
 """
-rQuant.portfolio — 最简持仓管理（JSON 文件存储）
+rquant.business.portfolio — 最简持仓管理（JSON 文件存储）
 - 不分多用户（单实例）
 - 不做 FIFO（直接加权平均）
 - 交易记录 / 快照都用 JSON
@@ -10,9 +10,9 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from data import _load_json, _save_json  # 复用统一 JSON 工具
+from .data import _load_json, _save_json  # 复用统一 JSON 工具
 
-DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
 PORTFOLIO_FILE = DATA_DIR / "portfolio.json"

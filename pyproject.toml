@@ -9,6 +9,7 @@ dependencies = [
     "pandas>=2.0",
     "requests>=2.30",
     "squarify>=0.4",
+    "curl-cffi>=0.13.0",
 ]
 
 [dependency-groups]

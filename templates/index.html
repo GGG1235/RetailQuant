@@ -2,14 +2,33 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>rQuant · {{ today }}</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/countup.js@2.8.0/dist/countUp.umd.js"></script>
+
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
   <nav class="navbar">
-    <span class="logo">📊 rQuant</span>
-    <span class="date">{{ today }}</span>
-    <button onclick="location.reload()" class="btn-sm">🔄 刷新</button>
+    <div class="navbar-left">
+      <span class="logo">rQuant</span>
+    </div>
+    <div class="navbar-center">
+      <span class="nav-item" id="nav-date">📅 {{ today }}</span>
+      <span class="nav-item"><span class="state-dot" id="state-dot"></span>市场状态 <b id="state-label">加载中</b></span>
+      <span class="nav-item">🕐 最后刷新 <b id="last-refresh">--:--:--</b></span>
+    </div>
+    <div class="navbar-right">
+      <button onclick="location.reload()" class="btn-icon" title="刷新">🔄</button>
+      <button class="btn-icon" title="设置">⚙️</button>
+      <span class="avatar">👤</span>
+    </div>
   </nav>
 
   <div class="container">
@@ -21,229 +40,664 @@
       {% endif %}
     {% endwith %}
 
-    <!-- 板块热力图 -->
-    <div class="box" id="treemap-box">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
-        <h2 style="margin:0;">🗺️ 板块热力图</h2>
-        <button class="tab-btn active" id="tab-sector" onclick="switchTab('sector')">行业板块</button>
-        <button class="tab-btn" id="tab-concept" onclick="switchTab('concept')">概念板块</button>
-        <span style="margin-left:auto;font-size:12px;color:#78909c;">矩形面积 ∝ 涨跌幅绝对值</span>
-      </div>
-      <div id="treemap-container" style="position:relative;">
-        <canvas id="treemap-canvas" width="900" height="500" style="display:block;border-radius:4px;max-width:100%;"></canvas>
-        <div id="treemap-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#78909c;font-size:14px;">加载中…</div>
-      </div>
-    </div>
-
-    <!-- 成分股弹窗 -->
-    <div id="stock-modal" class="modal" style="display:none;">
-      <div class="modal-content" style="max-width:500px;">
-        <h3 id="stock-modal-title" style="color:#00d4ff;margin-top:0;"></h3>
-        <table id="stock-modal-table" class="stock-table">
-          <thead><tr><th>代码</th><th>名称</th><th>涨幅</th><th>换手</th><th>操作</th></tr></thead>
-          <tbody></tbody>
-        </table>
-        <p id="stock-modal-empty" style="color:#78909c;text-align:center;display:none;">暂无成分股数据</p>
-        <button type="button" onclick="closeStockModal()" class="btn" style="margin-top:12px;">关闭</button>
-      </div>
-    </div>
-
-    <!-- 顶部卡片 -->
-    <div class="cards">
+    <!-- ====== 1. 6 张统计卡片（Hero） ====== -->
+    <div class="cards cards-6">
       <div class="card">
-        <div class="label">总成本</div>
-        <div class="value">¥{{ "{:,.0f}".format(total_cost) }}</div>
-      </div>
-      <div class="card">
-        <div class="label">总市值</div>
-        <div class="value">¥{{ "{:,.0f}".format(total_market) }}</div>
-      </div>
-      <div class="card {% if total_pnl > 0 %}green{% elif total_pnl < 0 %}red{% endif %}">
-        <div class="label">总盈亏</div>
-        <div class="value">
-          {{ '{:+,.0f}'.format(total_pnl) }}
-          <span class="pct">({{ '{:+.2f}'.format(total_pnl_pct) }}%)</span>
+        <div class="card-icon">💰</div>
+        <div class="card-body">
+          <div class="label">总资产</div>
+          <div class="value">¥<span id="count-total-assets">{{ "{:,.0f}".format(total_market) }}</span></div>
+          <div class="card-sub">资产净值</div>
         </div>
       </div>
       <div class="card">
-        <div class="label">持仓数</div>
-        <div class="value">{{ positions|length }}</div>
+        <div class="card-icon">💰</div>
+        <div class="card-body">
+          <div class="label">总市值</div>
+          <div class="value">¥<span id="count-total-market">{{ "{:,.0f}".format(total_market) }}</span></div>
+          <div class="card-sub">持仓市值</div>
+        </div>
+      </div>
+      <div class="card {% if total_pnl > 0 %}up{% elif total_pnl < 0 %}down{% endif %}">
+        <div class="card-icon">📈</div>
+        <div class="card-body">
+          <div class="label">今日盈亏</div>
+          <div class="value">
+            <span id="count-today-pnl">{{ '{:+,.0f}'.format(total_pnl) }}</span>
+          </div>
+          <div class="card-sub">
+            <span id="count-today-pnl-pct">{{ '{:+.2f}'.format(total_pnl_pct) }}%</span>
+            <svg class="mini-spark" viewBox="0 0 80 24" id="spark-pnl">
+              <path d="M0,18 L20,14 L40,12 L60,8 L80,4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-icon">📦</div>
+        <div class="card-body">
+          <div class="label">持仓数</div>
+          <div class="value"><span id="count-positions">{{ positions|length }}</span></div>
+          <div class="card-sub">只持仓股票</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-icon">🔥</div>
+        <div class="card-body">
+          <div class="label">买入信号</div>
+          <div class="value"><span id="count-buy-signals">{{ buy_signals|length }}</span></div>
+          <div class="card-sub">今日信号数</div>
+        </div>
+      </div>
+      <div class="card {% if sell_signals %}red{% endif %}">
+        <div class="card-icon">⏰</div>
+        <div class="card-body">
+          <div class="label">卖出提示</div>
+          <div class="value"><span id="count-sell-signals">{{ sell_signals|length }}</span></div>
+          <div class="card-sub">待处理提示</div>
+        </div>
       </div>
     </div>
 
-    <!-- 信号区 -->
-    <div class="row">
-      <div class="box">
-        <h2>📉 卖出提示 <span class="badge red">{{ sell_signals|length }}</span></h2>
-        {% if sell_signals %}
-          {% for s in sell_signals %}
-          <div class="signal sig-{{ s.urgency }}">
-            <div class="sig-head">
-              <span><b>{{ s.code }}</b> {{ s.name }}</span>
-              <span class="urgency-tag urgency-{{ s.urgency }}">{{ s.urgency }}</span>
-            </div>
-            <div class="sig-reason">{{ s.reason }}</div>
-            <div class="sig-detail">建议卖 ¥{{ "%.2f"|format(s.suggested_price) }}</div>
+    <!-- ====== 2. 第一行：板块热力图 + 今日决策 ====== -->
+    <div class="row row-60-40">
+      <!-- 板块热力图 -->
+      <div class="box" id="treemap-box">
+        <div class="box-head">
+          <h2>🗺️ 板块热力图</h2>
+          <div class="tab-group">
+            <button class="tab-btn active" id="tab-sector" onclick="switchTab('sector')">行业板块</button>
+            <button class="tab-btn" id="tab-concept" onclick="switchTab('concept')">概念板块</button>
           </div>
-          {% endfor %}
+          <div class="treemap-legend">
+            <span class="legend-item"><span class="legend-label">大小:</span> 成交额</span>
+            <span class="legend-item"><span class="legend-label">颜色:</span> 涨跌幅</span>
+            <div class="legend-bar">
+              <span class="legend-bar-seg" style="background:#2e7d32"></span>
+              <span class="legend-bar-seg" style="background:#388e3c"></span>
+              <span class="legend-bar-seg" style="background:#66bb6a"></span>
+              <span class="legend-bar-seg" style="background:#9e9e9e"></span>
+              <span class="legend-bar-seg" style="background:#ef5350"></span>
+              <span class="legend-bar-seg" style="background:#c62828"></span>
+              <span class="legend-bar-seg" style="background:#b71c1c"></span>
+            </div>
+            <div class="legend-bar-labels">
+              <span>-6%</span><span>-3%</span><span>0%</span><span>+3%</span><span>+6%
+            </div>
+          </div>
+        </div>
+        <div id="treemap-container">
+          <canvas id="treemap-canvas" width="900" height="500"></canvas>
+          <div id="treemap-loading">加载中…</div>
+        </div>
+        <div class="treemap-footer">注：数据每5分钟更新一次</div>
+      </div>
+      <div id="treemap-tooltip"></div>
+
+      <!-- 今日决策 -->
+      <div class="box" id="decision-box">
+        <div class="box-head">
+          <h2>📋 今日决策</h2>
+        </div>
+
+        <!-- 卖出提示 -->
+        <div class="decision-section">
+          <div class="section-title">
+            <span>卖出提示 <span class="badge red" id="sell-badge">{{ sell_signals|length }}</span></span>
+          </div>
+          <div id="sell-signals-list">
+          {% if sell_signals %}
+            {% for s in sell_signals[:3] %}
+            <div class="decision-item urgency-{{ s.urgency }}">
+              <div class="di-row">
+                <code class="di-code">{{ s.code }}</code>
+                <span class="di-name">{{ s.name }}</span>
+                <span class="urgency-tag urgency-{{ s.urgency }}">{{ s.urgency }}</span>
+              </div>
+              <div class="di-detail">
+                <span>现价 ¥{{ "%.2f"|format(s.current_price) }}</span>
+                <span>成本 ¥{{ "%.2f"|format(s.avg_cost) }}</span>
+                <span class="up">盈亏 <b>+{{ "%.2f".format(s.suggested_price - s.avg_cost) }}</b></span>
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+            <p class="empty" id="sell-empty">✅ 暂无卖出提示</p>
+          {% endif %}
+          </div>
+        </div>
+
+        <!-- 买入信号 Top5 -->
+        <div class="decision-section">
+          <div class="section-title">
+            <span>买入信号 Top5</span>
+          </div>
+          <div class="top-signal-list">
+          {% if buy_signals %}
+            {% for s in buy_signals[:5] %}
+            <div class="top-signal-row">
+              <div class="ts-row-1">
+                <span class="ts-rank">{{ loop.index }}</span>
+                <code class="di-code">{{ s.code }}</code>
+                <span class="ts-name">{{ s.name }} <span class="ts-sector">· {{ s.sector }}</span></span>
+                <span class="ts-score">评分 <b>{{ s.confidence }}</b></span>
+              </div>
+              <div class="ts-row-2">
+                <span class="ts-reason">{{ s.reason }}</span>
+                <span class="ts-buy">建议买 <b>¥{{ "%.2f"|format(s.suggested_buy) }}</b></span>
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+            <p class="empty">📭 今日无信号</p>
+          {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====== 3. 第二行：当前持仓概要 + 买入信号列表 ====== -->
+    <div class="row row-60-40">
+      <!-- 当前持仓 -->
+      <div class="box" id="positions-box">
+        <div class="box-head">
+          <h2>📦 当前持仓</h2>
+          <button onclick="showAddForm()" class="btn-sm btn-add">+ 添加</button>
+        </div>
+        <div id="add-form" class="form" style="display:none;">
+          <form method="POST" action="{{ url_for('add_position') }}">
+            <input type="text" name="code" placeholder="代码 sh600460" required pattern="(sh|sz)\d{6}">
+            <input type="number" name="shares" placeholder="股数（100整数倍）" required min="100" step="100">
+            <input type="number" name="price" placeholder="价格" required step="0.01" min="0.01">
+            <button type="submit" class="btn-primary">买入</button>
+            <button type="button" onclick="hideAddForm()" class="btn">取消</button>
+          </form>
+        </div>
+
+        {% if positions %}
+        <table>
+          <thead>
+            <tr>
+              <th>代码</th><th>名称</th><th>股数</th><th>成本</th>
+              <th>市价</th><th>市值</th><th>盈亏</th><th>盈亏率</th><th>仓位</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in positions %}
+            <tr>
+              <td><code>{{ p.code }}</code></td>
+              <td>{{ p.name }}</td>
+              <td>{{ p.shares }}</td>
+              <td>¥{{ "%.2f"|format(p.avg_cost) }}</td>
+              <td>¥{{ "%.2f"|format(p.current_price) }}</td>
+              <td>¥{{ "{:,.0f}".format(p.market_value) }}</td>
+              <td class="{% if p.pnl > 0 %}up{% elif p.pnl < 0 %}down{% endif %}">
+                {{ '{:+,.0f}'.format(p.pnl) }}
+              </td>
+              <td class="{% if p.pnl > 0 %}up{% elif p.pnl < 0 %}down{% endif %}">
+                <b>{{ '{:+.2f}'.format(p.pnl_pct) }}%</b>
+              </td>
+              <td>
+                {% set pct = (p.market_value / total_market * 100) if total_market > 0 else 0 %}
+                <div class="pos-bar"><div class="pos-bar-fill" style="width:{{ '%.0f'|format(pct) }}%"></div></div>
+                <span class="pos-pct">{{ '%.0f'|format(pct) }}%</span>
+              </td>
+              <td>
+                <button type="button" onclick="showSellForm('{{ p.code }}', {{ p.shares }}, {{ p.current_price }})" class="btn-sell btn-sm">卖出</button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="hint">注：当前数据为实时估值，可能与实际成交存在差异</p>
         {% else %}
-          <p class="empty">✅ 无（持仓健康）</p>
+        <p class="empty">📭 暂无持仓</p>
         {% endif %}
       </div>
 
-      <div class="box">
-        <h2>🔥 买入信号 <span class="badge green">{{ buy_signals|length }}</span></h2>
+      <!-- 持仓分布（饼图） -->
+      {% if positions %}
+      <div class="box chart-box" id="distribution-box">
+        <div class="box-head">
+          <h2>🥧 持仓分布</h2>
+        </div>
+        <div class="dist-stats">
+          <div class="dist-stat">
+            <span class="label">持仓股票</span>
+            <span class="value"><b>{{ positions|length }}</b> 只</span>
+          </div>
+          <div class="dist-stat">
+            <span class="label">总市值</span>
+            <span class="value">¥{{ "{:,.0f}".format(total_market) }}</span>
+          </div>
+          <div class="dist-stat {% if total_pnl > 0 %}up{% elif total_pnl < 0 %}down{% endif %}">
+            <span class="label">浮动盈亏</span>
+            <span class="value">{{ '{:+,.0f}'.format(total_pnl) }} ({{ '{:+.2f}'.format(total_pnl_pct) }}%)</span>
+          </div>
+          <div class="dist-stat">
+            <span class="label">仓位占比</span>
+            <span class="value">100.00%</span>
+          </div>
+        </div>
+        <div class="chart-wrapper dist-chart">
+          <canvas id="position-chart"></canvas>
+        </div>
+        <p class="hint hint-center">持仓集中度较高，请注意风险控制</p>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- 买入信号列表 -->
+    <div class="box" id="buy-signals-box">
+      <div class="box-head">
+        <h2>🔥 买入信号列表 <span class="badge green" id="buy-badge">{{ buy_signals|length }}</span></h2>
+        <div class="filter-group">
+          <select id="filter-category" onchange="onCategoryChange()">
+            <option value="all">📂 全部大类</option>
+            {% for cat in category_options %}
+              <option value="{{ cat.value }}">{{ cat.label }}</option>
+            {% endfor %}
+          </select>
+          <select id="filter-strategy" onchange="applyFilter()">
+            <option value="all">🎯 全部策略</option>
+          </select>
+          <span class="filter-count" id="filter-count-display"></span>
+        </div>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr><th>代码</th><th>名称</th><th>行业</th><th>策略</th><th>建议买价</th><th>买入原因</th><th>评分</th><th>操作</th></tr>
+        </thead>
+        <tbody id="buy-signals-list">
         {% if buy_signals %}
           {% for s in buy_signals %}
-          <div class="signal">
-            <div class="sig-head">
-              <span><b>{{ s.code }}</b> {{ s.name }} · {{ s.sector }}</span>
-              <span class="strat-tag">{{ s.strategy }}</span>
-            </div>
-            <div class="sig-reason">{{ s.reason }}</div>
-            <div class="sig-detail">
-              现价 ¥{{ "%.2f"|format(s.current_price) }} → 买 ¥{{ "%.2f"|format(s.suggested_buy) }}
-              · 止损 ¥{{ "%.2f"|format(s.stop_loss) }} · 止盈 ¥{{ "%.2f"|format(s.take_profit) }}
-            </div>
-          </div>
+          <tr class="signal-row" data-category="{{ s.category }}" data-strategy="{{ s.strategy }}">
+            <td><code>{{ s.code }}</code></td>
+            <td>{{ s.name }}</td>
+            <td>{{ s.sector }}</td>
+            <td><span class="strat-tag">{{ s.strategy }}</span></td>
+            <td><b class="buy-price">¥{{ "%.2f"|format(s.suggested_buy) }}</b></td>
+            <td class="reason-cell" title="{{ s.reason }}">{{ s.reason }}</td>
+            <td><b class="score-b">{{ s.confidence }}</b></td>
+            <td><button class="btn-sm btn-view" onclick="showAddForCode('{{ s.code }}', {{ s.current_price }})">查看</button></td>
+          </tr>
           {% endfor %}
         {% else %}
-          <p class="empty">📭 今日无信号</p>
+          <tr><td colspan="8" class="empty-cell" id="buy-empty">📭 今日无信号</td></tr>
         {% endif %}
-      </div>
-    </div>
-
-    <!-- 持仓 + 自选股 并排 -->
-    <div class="row" id="holdings-row">
-    <!-- 持仓 -->
-    <div class="box" id="positions-box">
-      <h2>📦 当前持仓</h2>
-      <button onclick="showAddForm()" class="btn">+ 添加</button>
-      <div id="add-form" class="form" style="display:none;">
-        <form method="POST" action="{{ url_for('add_position') }}">
-          <input type="text" name="code" placeholder="代码 sh600460" required pattern="(sh|sz)\d{6}">
-          <input type="number" name="shares" placeholder="股数（100整数倍）" required min="100" step="100">
-          <input type="number" name="price" placeholder="价格" required step="0.01" min="0.01">
-          <button type="submit" class="btn-primary">买入</button>
-          <button type="button" onclick="hideAddForm()" class="btn">取消</button>
-        </form>
-      </div>
-
-      {% if positions %}
-      <table>
-        <thead>
-          <tr>
-            <th>代码</th><th>名称</th><th>股数</th><th>成本</th>
-            <th>现价</th><th>市值</th><th>盈亏</th><th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for p in positions %}
-          <tr>
-            <td><code>{{ p.code }}</code></td>
-            <td>{{ p.name }}</td>
-            <td>{{ p.shares }}</td>
-            <td>¥{{ "%.2f"|format(p.avg_cost) }}</td>
-            <td>¥{{ "%.2f"|format(p.current_price) }}</td>
-            <td>¥{{ "{:,.0f}".format(p.market_value) }}</td>
-            <td class="{% if p.pnl > 0 %}green{% elif p.pnl < 0 %}red{% endif %}">
-              {{ '{:+,.0f}'.format(p.pnl) }}<br>
-              <span class="pct">{{ '{:+.2f}'.format(p.pnl_pct) }}%</span>
-            </td>
-            <td>
-              <button type="button" onclick="showSellForm('{{ p.code }}', {{ p.shares }}, {{ p.current_price }})" class="btn-sell">卖</button>
-            </td>
-          </tr>
-          {% endfor %}
         </tbody>
       </table>
-      {% else %}
-        <p class="empty">📭 暂无持仓</p>
-      {% endif %}
+      <div class="see-all"><a href="#">查看全部信号 ›</a></div>
+      <p class="empty" id="buy-signal-empty" style="display:none;">🔍 当前筛选下无信号</p>
     </div>
 
-    <!-- 自选股 -->
-    <div class="box" id="watchlist-box">
-      <h2>⭐ 自选股 <span class="badge green" id="watchlist-badge">{{ watchlist_stocks|length }}</span></h2>
-      {% if watchlist_stocks %}
-      <table>
-        <thead>
-          <tr><th>代码</th><th>名称</th><th>现价</th><th>涨幅</th><th>板块</th><th>操作</th></tr>
-        </thead>
-        <tbody id="watchlist-tbody">
-          {% for w in watchlist_stocks %}
-          <tr>
-            <td><code>{{ w.code }}</code></td>
-            <td>{{ w.name }}</td>
-            <td>{% if w.price > 0 %}¥{{ "%.2f"|format(w.price) }}{% else %}—{% endif %}</td>
-            <td class="{% if w.change_pct > 0 %}green{% elif w.change_pct < 0 %}red{% endif %}">
-              {{ '{:+.2f}'.format(w.change_pct) }}%
-            </td>
-            <td>{{ w.sector }}</td>
-            <td>
-              {% if w.is_held %}
-              <span class="held-tag">已持仓</span>
-              {% else %}
-              <button type="button" onclick="showAddForCode('{{ w.code }}', {{ w.price }})" class="btn-primary btn-sm">买入</button>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-        <p class="empty" id="watchlist-empty">📭 暂无自选股，点击板块成分股旁的 + 添加</p>
-      {% endif %}
-    </div>
-    </div>
-
-    <!-- 卖出弹窗 -->
-    <div id="sell-modal" class="modal" style="display:none;">
-      <div class="modal-content">
-        <h3>🔴 卖出 <span id="sell-code"></span></h3>
-        <p style="color:#888;">持仓: <span id="sell-held"></span> 股 · 现价: ¥<span id="sell-price"></span></p>
-        <form method="POST" id="sell-form" action="">
-          <label>卖出价格 <input type="number" name="price" id="sell-price-input" step="0.01" required></label>
-          <label>卖出股数 <input type="number" name="shares" id="sell-shares-input" min="100" step="100" required></label>
-          <div id="sell-preview" style="background:#1a1a2e;padding:10px;border-radius:4px;margin:10px 0;"></div>
-          <button type="submit" class="btn-primary">确认卖出</button>
-          <button type="button" onclick="closeSell()" class="btn">取消</button>
-        </form>
-      </div>
-    </div>
-
-
-    <!-- 交易历史 -->
+    <!-- ====== 4. 交易历史 ====== -->
     {% if trades %}
-    <div class="box">
-      <h2>📜 交易历史</h2>
-      <table>
-        <thead>
-          <tr><th>ID</th><th>日期</th><th>方向</th><th>代码</th><th>名称</th><th>股数</th><th>价格</th><th>备注</th><th>操作</th></tr>
-        </thead>
-        <tbody>
-          {% for t in trades %}
-          <tr>
-            <td>{{ t.id }}</td>
-            <td>{{ t.date }}</td>
-            <td>{% if t.side == 'BUY' %}🟢 买{% else %}🔴 卖{% endif %}</td>
-            <td><code>{{ t.code }}</code></td>
-            <td>{{ t.name }}</td>
-            <td>{{ t.shares }}</td>
-            <td>¥{{ "%.2f"|format(t.price) }}</td>
-            <td>{{ t.note }}</td>
-            <td>
-              <button type="button" onclick="deleteTrade('{{ t.id }}')" class="btn-sell">删</button>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div class="box collapsible" id="trades-box">
+      <div class="box-head" onclick="toggleTrades()" style="cursor:pointer;">
+        <h2>📜 交易历史 <span class="badge">{{ trades|length }}</span></h2>
+        <span class="box-hint" id="trades-toggle-hint">点击展开 ▾</span>
+      </div>
+      <div class="collapsible-body" id="trades-body" style="display:none;">
+        <table class="data-table">
+          <thead>
+            <tr><th>ID</th><th>日期</th><th>方向</th><th>代码</th><th>名称</th>
+                <th>股数</th><th>价格</th><th>金额</th><th>策略</th><th>状态</th></tr>
+          </thead>
+          <tbody>
+            {% for t in trades %}
+            <tr>
+              <td><code>{{ t.id[:8] }}</code></td>
+              <td>{{ t.date }}</td>
+              <td><span class="side-{{ t.side|lower }}">{% if t.side == 'BUY' %}买入{% else %}卖出{% endif %}</span></td>
+              <td><code>{{ t.code }}</code></td>
+              <td>{{ t.name }}</td>
+              <td>{{ t.shares }}</td>
+              <td>¥{{ "%.2f"|format(t.price) }}</td>
+              <td>¥{{ "{:,.0f}".format(t.shares * t.price) }}</td>
+              <td>{{ t.note or '-' }}</td>
+              <td><span class="status-done">已成交</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
     {% endif %}
+
+    <!-- ====== 5. 自选股 + 策略状态 ====== -->
+    <div class="row row-50-50">
+      <!-- 自选股 -->
+      <div class="box" id="watchlist-box">
+        <div class="box-head">
+          <h2>⭐ 自选股 <span class="badge green" id="watchlist-badge">{{ watchlist_stocks|length }}</span></h2>
+        </div>
+        {% if watchlist_stocks %}
+        <table class="data-table">
+          <thead>
+            <tr><th>代码</th><th>名称</th><th>现价</th><th>涨幅</th><th>板块</th><th>操作</th><th></th></tr>
+          </thead>
+          <tbody id="watchlist-tbody">
+            {% for w in watchlist_stocks %}
+            <tr data-code="{{ w.code }}">
+              <td><code>{{ w.code }}</code></td>
+              <td>{{ w.name }}</td>
+              <td>{% if w.price > 0 %}¥{{ "%.2f"|format(w.price) }}{% else %}—{% endif %}</td>
+              <td class="{% if w.change_pct > 0 %}up{% elif w.change_pct < 0 %}down{% endif %}">
+                {{ '{:+.2f}'.format(w.change_pct) }}%
+              </td>
+              <td>{{ w.sector }}</td>
+              <td>
+                {% if w.is_held %}
+                  <span class="held-tag">已持仓</span>
+                {% else %}
+                  <button type="button" onclick="showAddForCode('{{ w.code }}', {{ w.price }})" class="btn-primary btn-sm">买入</button>
+                {% endif %}
+              </td>
+              <td><button type="button" onclick="removeFromWatchlist('{{ w.code }}')" class="btn-del" title="移出自选">−</button></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+          <div class="empty-icon">⭐</div>
+          <div class="empty-text">暂无自选股</div>
+          <div class="empty-hint">点击右上角的"设置"添加自选股</div>
+          <button class="btn-primary btn-sm" onclick="showAddForm()">前往设置</button>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- 策略状态 -->
+      <div class="box" id="strategy-status-box">
+        <div class="box-head">
+          <h2>⚙️ 策略状态</h2>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr><th>策略名称</th><th>状态</th><th>今日信号</th><th>最后运行</th></tr>
+          </thead>
+          <tbody id="strategy-status-tbody">
+            <tr><td colspan="4" class="empty-cell">加载中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ====== 6. 系统日志 ====== -->
+    <div class="box" id="system-log-box">
+      <div class="box-head">
+        <h2>📋 系统日志 <span class="badge" id="log-badge">0</span></h2>
+        <span class="box-hint">最近 50 条 · 自动滚动</span>
+      </div>
+      <table class="data-table log-table">
+        <thead>
+          <tr><th style="width:90px">时间</th><th style="width:70px">级别</th><th style="width:120px">模块</th><th>消息</th></tr>
+        </thead>
+        <tbody id="system-log-tbody">
+          <tr><td colspan="4" class="empty-cell">加载中…</td></tr>
+        </tbody>
+      </table>
+      <div class="see-all"><a href="#" onclick="reloadSystemLog(); return false;">查看更多日志 ›</a></div>
+    </div>
+  </div>
+
+  <!-- ====== Modals ====== -->
+  <div id="stock-modal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width:520px;">
+      <h3 id="stock-modal-title"></h3>
+      <table id="stock-modal-table" class="stock-table">
+        <thead><tr><th>代码</th><th>名称</th><th>涨幅</th><th>换手</th><th>操作</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="stock-modal-empty" style="color:#78909c;text-align:center;display:none;">暂无成分股数据</p>
+      <button type="button" onclick="closeStockModal()" class="btn" style="margin-top:14px;">关闭</button>
+    </div>
+  </div>
+
+  <div id="sell-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <h3>🔴 卖出 <span id="sell-code"></span></h3>
+      <p style="color:#888;">持仓: <span id="sell-held"></span> 股 · 现价: ¥<span id="sell-price"></span></p>
+      <form method="POST" id="sell-form" action="">
+        <label>卖出价格 <input type="number" name="price" id="sell-price-input" step="0.01" required></label>
+        <label>卖出股数 <input type="number" name="shares" id="sell-shares-input" min="100" step="100" required></label>
+        <div id="sell-preview"></div>
+        <button type="submit" class="btn-primary">确认卖出</button>
+        <button type="button" onclick="closeSell()" class="btn">取消</button>
+      </form>
+    </div>
   </div>
 
   <script>
+  // ========== 状态信息（页面启动时拉一次） ==========
+  document.addEventListener('DOMContentLoaded', () => {
+    refreshLastRefresh();
+    setInterval(refreshLastRefresh, 1000);
+    reloadMarketStatus();
+    reloadStrategyStatus();
+    reloadSystemLog();
+    setInterval(reloadSystemLog, 10000);
+  });
+
+  function refreshLastRefresh() {
+    const now = new Date();
+    const t = now.toTimeString().slice(0, 8);
+    const el = document.getElementById('last-refresh');
+    if (el) el.textContent = t;
+  }
+
+  async function reloadMarketStatus() {
+    try {
+      const r = await fetch('/api/market_status');
+      const m = await r.json();
+      const dot = document.getElementById('state-dot');
+      const label = document.getElementById('state-label');
+      const state = m.state || '休市';
+      const isOpen = m.is_open;
+      label.textContent = isOpen ? `● ${state}` : '休市';
+      label.style.color = isOpen ? '#00e676' : '#78909c';
+      if (dot) {
+        dot.className = 'state-dot ' + (isOpen ? 'on' : 'off');
+      }
+    } catch (e) {}
+  }
+
+  async function reloadStrategyStatus() {
+    try {
+      const r = await fetch('/api/strategy_status');
+      const d = await r.json();
+      const tbody = document.getElementById('strategy-status-tbody');
+      const items = d.strategies || [];
+      tbody.innerHTML = items.map(s => {
+        const statusClass = s.status === 'running' ? 'run' : 'stop';
+        const statusText = s.status === 'running' ? '● 运行中' : '● 停机';
+        return `<tr>
+          <td><b>${s.name}</b></td>
+          <td><span class="strat-status ${statusClass}">${statusText}</span></td>
+          <td>${s.signals_today}</td>
+          <td><code>${s.last_run || '--:--:--'}</code></td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="4" class="empty-cell">暂无策略</td></tr>';
+    } catch (e) {
+      console.error('reloadStrategyStatus failed:', e);
+    }
+  }
+
+  async function reloadSystemLog() {
+    try {
+      const r = await fetch('/api/system_log');
+      const d = await r.json();
+      const tbody = document.getElementById('system-log-tbody');
+      const badge = document.getElementById('log-badge');
+      const items = d.logs || [];
+      if (badge) badge.textContent = items.length;
+      tbody.innerHTML = items.map(l => {
+        const lvl = l.level || 'INFO';
+        return `<tr>
+          <td><code>${l.ts}</code></td>
+          <td><span class="lvl lvl-${lvl}">${lvl}</span></td>
+          <td>${l.module || l.logger || '-'}</td>
+          <td>${l.message}</td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="4" class="empty-cell">暂无日志</td></tr>';
+    } catch (e) {
+      console.error('reloadSystemLog failed:', e);
+    }
+  }
+
+  // ========== 持仓饼图 ==========
+  {% if positions %}
+  (function initPositionChart() {
+    const positions = {{ positions|tojson }};
+    const labels = positions.map(p => p.name);
+    const data = positions.map(p => p.market_value);
+    const colors = [
+      'rgba(0, 212, 255, 0.85)',
+      'rgba(183, 148, 244, 0.85)',
+      'rgba(0, 230, 118, 0.85)',
+      'rgba(255, 82, 82, 0.85)',
+      'rgba(255, 215, 64, 0.85)',
+    ];
+    const ctx = document.getElementById('position-chart');
+    if (!ctx) return;
+    const total = data.reduce((a, b) => a + b, 0);
+    // 在中央显示 100% + 总额
+    new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: data,
+          backgroundColor: colors.slice(0, labels.length),
+          borderColor: 'rgba(10, 10, 26, 1)',
+          borderWidth: 2,
+          hoverOffset: 12,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '70%',
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: {
+              color: '#94a3b8',
+              font: { family: '"Inter", sans-serif', size: 11 },
+              padding: 8,
+              usePointStyle: true,
+              pointStyle: 'circle',
+              boxWidth: 8,
+            }
+          },
+          tooltip: {
+            backgroundColor: 'rgba(15, 15, 35, 0.95)',
+            borderColor: 'rgba(0, 212, 255, 0.3)',
+            borderWidth: 1,
+            padding: 12,
+            callbacks: {
+              label: (ctx) => {
+                const pct = (ctx.parsed / total * 100).toFixed(1);
+                return ` ${ctx.label}: ¥${ctx.parsed.toLocaleString()} (${pct}%)`;
+              }
+            }
+          }
+        }
+      },
+      plugins: [{
+        id: 'centerText',
+        afterDraw(chart) {
+          const { ctx, chartArea } = chart;
+          const cx = (chartArea.left + chartArea.right) / 2;
+          const cy = (chartArea.top + chartArea.bottom) / 2;
+          ctx.save();
+          ctx.fillStyle = '#94a3b8';
+          ctx.font = '11px Inter, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('总市值占比', cx, cy - 12);
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 18px Inter, sans-serif';
+          ctx.fillText('100.00%', cx, cy + 12);
+          ctx.restore();
+        }
+      }]
+    });
+  })();
+  {% endif %}
+
+  // ========== 数字 CountUp 动画 ==========
+  document.addEventListener('DOMContentLoaded', () => {
+    const opts = (dec = 0, prefix = '', suffix = '') => ({
+      duration: 1.2, separator: ',', decimal: '.', decimals: dec,
+      prefix, suffix, useEasing: true,
+    });
+    const mk = (id, val, dec, prefix, suffix) => {
+      const el = document.getElementById(id);
+      if (!el || typeof countUp === 'undefined') return;
+      const c = new countUp.CountUp(el, val, opts(dec, prefix, suffix));
+      if (!c.error) c.start();
+    };
+    const strip = (s) => parseFloat(String(s).replace(/[^\d.\-]/g, '')) || 0;
+    mk('count-total-assets', strip(document.getElementById('count-total-assets')?.textContent || '0'), 0, '¥', '');
+    mk('count-total-market', strip(document.getElementById('count-total-market')?.textContent || '0'), 0, '¥', '');
+    mk('count-today-pnl', strip(document.getElementById('count-today-pnl')?.textContent || '0'), 0, '', '');
+    mk('count-positions', strip(document.getElementById('count-positions')?.textContent || '0'), 0, '', '');
+    mk('count-buy-signals', strip(document.getElementById('count-buy-signals')?.textContent || '0'), 0, '', '');
+    mk('count-sell-signals', strip(document.getElementById('count-sell-signals')?.textContent || '0'), 0, '', '');
+  });
+
+  // ========== 交易历史折叠 ==========
+  function toggleTrades() {
+    const body = document.getElementById('trades-body');
+    const hint = document.getElementById('trades-toggle-hint');
+    if (body.style.display === 'none') {
+      body.style.display = '';
+      hint.textContent = '点击折叠 ▴';
+    } else {
+      body.style.display = 'none';
+      hint.textContent = '点击展开 ▾';
+    }
+  }
+
+  // ========== 买入信号筛选 ==========
+  const strategiesByCategory = {{ strategies_by_category|tojson }};
+
+  function onCategoryChange() {
+    const cat = document.getElementById('filter-category').value;
+    const stratSel = document.getElementById('filter-strategy');
+    stratSel.innerHTML = '<option value="all">🎯 全部策略</option>';
+    if (cat !== 'all' && strategiesByCategory[cat]) {
+      strategiesByCategory[cat].forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.name; opt.textContent = s.name;
+        stratSel.appendChild(opt);
+      });
+    }
+    applyFilter();
+  }
+
+  function applyFilter() {
+    const cat = document.getElementById('filter-category').value;
+    const strat = document.getElementById('filter-strategy').value;
+    const items = document.querySelectorAll('#buy-signals-list .signal-row');
+    let visible = 0;
+    items.forEach(item => {
+      const ok = (cat === 'all' || item.dataset.category === cat) &&
+                 (strat === 'all' || item.dataset.strategy === strat);
+      item.style.display = ok ? '' : 'none';
+      if (ok) visible++;
+    });
+    const total = items.length;
+    const display = document.getElementById('filter-count-display');
+    display.textContent = (cat === 'all' && strat === 'all') ? '' : `（显示 ${visible} / ${total}）`;
+    const empty = document.getElementById('buy-signal-empty');
+    const tbody = document.getElementById('buy-signals-list');
+    if (visible === 0 && total > 0) { empty.style.display = 'block'; tbody.style.display = 'none'; }
+    else { empty.style.display = 'none'; tbody.style.display = ''; }
+  }
+
   function showAddForm() { document.getElementById('add-form').style.display = 'block'; }
   function hideAddForm() { document.getElementById('add-form').style.display = 'none'; }
 
@@ -259,8 +713,8 @@
     updatePreview();
   }
   function closeSell() { document.getElementById('sell-modal').style.display = 'none'; }
-  // ========== Treemap 矩形树图 ==========
 
+  // ========== Treemap ==========
   let treemapData = [];
   let currentBoardType = 'sector';
   let CANVAS_W = 900, CANVAS_H = 500;
@@ -274,17 +728,13 @@
   }
 
   async function loadTreemap(type) {
-    console.log('[treemap] loadTreemap 被调用, type=' + type);
     const loading = document.getElementById('treemap-loading');
-    if (!loading) { console.error('[treemap] loading 元素不存在'); return; }
+    if (!loading) return;
     loading.style.display = 'flex';
+    loading.textContent = '加载中…';
     try {
-      const url = '/api/boards?type=' + type;
-      console.log('[treemap] 请求: ' + url);
-      const resp = await fetch(url);
-      console.log('[treemap] 响应状态: ' + resp.status);
+      const resp = await fetch('/api/boards?type=' + type);
       const data = await resp.json();
-      console.log('[treemap] 数据 count: ' + data.count);
       treemapData = data.boards || [];
       if (treemapData.length === 0) {
         loading.textContent = '暂无数据';
@@ -293,9 +743,35 @@
       drawTreemap(treemapData);
       loading.style.display = 'none';
     } catch (e) {
-      console.error('[treemap] 请求失败:', e.message || e);
-      loading.textContent = '加载失败，请刷新重试';
+      loading.textContent = '加载失败';
     }
+  }
+
+  function treemapColor(pct) {
+    // A 股惯例：红涨绿跌
+    // 7 段颜色（-6% 跌=深绿 / ... / 0% 灰 / ... / +6% 涨=深红）
+    const stops = [
+      { v: -6, c: [46, 125, 50] },    // 深绿（跌最多）
+      { v: -3, c: [56, 142, 60] },    // 绿
+      { v: -1, c: [102, 187, 106] },  // 浅绿
+      { v:  0, c: [158, 158, 158] },  // 灰
+      { v:  1, c: [239, 83, 80] },    // 浅红
+      { v:  3, c: [198, 40, 40] },    // 红
+      { v:  6, c: [183, 28, 28] },    // 深红（涨最多）
+    ];
+    let lower = stops[0], upper = stops[stops.length - 1];
+    for (let i = 0; i < stops.length - 1; i++) {
+      if (pct >= stops[i].v && pct <= stops[i+1].v) {
+        lower = stops[i]; upper = stops[i+1]; break;
+      }
+    }
+    if (pct <= stops[0].v) return `rgb(${stops[0].c.join(',')})`;
+    if (pct >= stops[stops.length-1].v) return `rgb(${stops[stops.length-1].c.join(',')})`;
+    const t = (pct - lower.v) / (upper.v - lower.v);
+    const r = Math.round(lower.c[0] + (upper.c[0] - lower.c[0]) * t);
+    const g = Math.round(lower.c[1] + (upper.c[1] - lower.c[1]) * t);
+    const b = Math.round(lower.c[2] + (upper.c[2] - lower.c[2]) * t);
+    return `rgb(${r},${g},${b})`;
   }
 
   function drawTreemap(items) {
@@ -303,7 +779,7 @@
     const container = document.getElementById('treemap-container');
     const dpr = window.devicePixelRatio || 1;
     const containerW = container ? container.clientWidth : 900;
-    const scale = containerW / 900;  // 后端坐标基于 900×500
+    const scale = containerW / 900;
     CANVAS_W = Math.floor(containerW * dpr);
     CANVAS_H = Math.floor(CANVAS_W / ASPECT);
     canvas.width = CANVAS_W;
@@ -314,7 +790,6 @@
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
-    // 按后端传来的 x, y, w, h 渲染（坐标是 900×500 基准，需缩放到实际 Canvas）
     const rects = items.map(item => ({
       x: item.x * scale * dpr,
       y: item.y * scale * dpr,
@@ -330,25 +805,22 @@
       const r = rects[i];
       if (!r) continue;
       const pct = item.change_pct || 0;
-      const absPct = Math.abs(pct);
-      const intensity = Math.min(absPct / 10, 1);
-      let rc, gc, bc;
-      if (pct >= 0) {
-        rc = Math.round(200 + 55 * intensity);
-        gc = Math.round(60 - 40 * intensity);
-        bc = Math.round(60 - 40 * intensity);
-      } else {
-        rc = Math.round(60 - 40 * intensity);
-        gc = Math.round(170 + 50 * intensity);
-        bc = Math.round(80 - 50 * intensity);
-      }
       const rx = r.x + PADDING * dpr, ry = r.y + PADDING * dpr,
             rw = Math.max(1, r.w - 2 * PADDING * dpr),
             rh = Math.max(1, r.h - 2 * PADDING * dpr);
 
-      ctx.fillStyle = `rgb(${rc},${gc},${bc})`;
+      // 渐变（顶亮底暗）
+      const baseColor = treemapColor(pct);
+      const grad = ctx.createLinearGradient(rx, ry, rx, ry + rh);
+      grad.addColorStop(0, baseColor);
+      grad.addColorStop(1, 'rgba(0,0,0,0.3)');
+      ctx.fillStyle = baseColor;
       ctx.fillRect(rx, ry, rw, rh);
-      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+      // 顶部高光
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      ctx.fillRect(rx, ry, rw, Math.min(2 * dpr, rh / 3));
+      // 边框
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
       ctx.lineWidth = 0.5 * dpr;
       ctx.strokeRect(rx, ry, rw, rh);
 
@@ -362,6 +834,8 @@
         ctx.font = `bold ${fontSize}px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
+        ctx.shadowColor = 'rgba(0,0,0,0.6)';
+        ctx.shadowBlur = 3 * dpr;
         const cx = rx + rw / 2;
         const cy = rh > 40 * dpr ? ry + rh / 2 - 7 * dpr : ry + rh / 2;
         ctx.fillText(text1, cx, cy);
@@ -369,13 +843,37 @@
           ctx.font = `${Math.min(11 * dpr, Math.floor(rh / 5))}px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`;
           ctx.fillText(text2, cx, cy + 16 * dpr);
         }
+        ctx.shadowBlur = 0;
       }
     }
   }
 
-  // Squarified Treemap 坐标由后端 Python squarify 库计算，前端不再需要此函数
+  function showTreemapTooltip(item, x, y) {
+    const tt = document.getElementById('treemap-tooltip');
+    if (!tt) return;
+    const pct = item.change_pct || 0;
+    const sign = pct >= 0 ? '+' : '';
+    const dir = pct >= 0 ? 'up' : 'down';
+    const turnover = (item.turnover || 0);
+    const turnoverStr = turnover > 1e8 ? (turnover / 1e8).toFixed(2) + ' 亿'
+                       : turnover > 1e4 ? (turnover / 1e4).toFixed(2) + ' 万'
+                       : turnover.toFixed(0);
+    tt.innerHTML = `
+      <div class="tt-name">${item.name}</div>
+      <div class="tt-pct ${dir}">${sign}${pct.toFixed(2)}%</div>
+      <div class="tt-row"><span>成交额</span><b>${turnoverStr}</b></div>
+      <div class="tt-row"><span>成分股</span><b>${item.stocks_count || 0} 只</b></div>
+      <div class="tt-row"><span>领涨股</span><b>${item.lead_stock || '-'}</b></div>
+    `;
+    tt.style.left = (x + 14) + 'px';
+    tt.style.top = (y + 14) + 'px';
+    tt.classList.add('show');
+  }
+  function hideTreemapTooltip() {
+    const tt = document.getElementById('treemap-tooltip');
+    if (tt) tt.classList.remove('show');
+  }
 
-  // Canvas 鼠标事件
   document.addEventListener('DOMContentLoaded', () => {
     const canvas = document.getElementById('treemap-canvas');
     canvas.addEventListener('mousemove', (e) => {
@@ -384,32 +882,31 @@
       const scaleY = CANVAS_H / rect.height;
       const mx = (e.clientX - rect.left) * scaleX;
       const my = (e.clientY - rect.top) * scaleY;
-
       canvas.style.cursor = 'default';
+      hideTreemapTooltip();
       if (canvas._rects && canvas._items) {
         for (let i = 0; i < canvas._rects.length; i++) {
           const r = canvas._rects[i];
           if (mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h) {
             canvas.style.cursor = 'pointer';
+            showTreemapTooltip(canvas._items[i], e.clientX, e.clientY);
             break;
           }
         }
       }
     });
-
+    canvas.addEventListener('mouseleave', hideTreemapTooltip);
     canvas.addEventListener('click', (e) => {
       const rect = canvas.getBoundingClientRect();
       const scaleX = CANVAS_W / rect.width;
       const scaleY = CANVAS_H / rect.height;
       const mx = (e.clientX - rect.left) * scaleX;
       const my = (e.clientY - rect.top) * scaleY;
-
       if (canvas._rects && canvas._items) {
         for (let i = 0; i < canvas._rects.length; i++) {
           const r = canvas._rects[i];
           if (mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h) {
-            const item = canvas._items[i];
-            showStocks(item.code, item.name);
+            showStocks(canvas._items[i].code, canvas._items[i].name);
             break;
           }
         }
@@ -423,12 +920,10 @@
     const title = document.getElementById('stock-modal-title');
     const tbody = document.getElementById('stock-modal-table').querySelector('tbody');
     const empty = document.getElementById('stock-modal-empty');
-
     title.textContent = `📋 ${name} (${code}) 成分股`;
     tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#78909c;">加载中…</td></tr>';
     empty.style.display = 'none';
     modal.style.display = 'flex';
-
     try {
       const resp = await fetch('/api/board/' + code + '/stocks');
       const data = await resp.json();
@@ -440,33 +935,27 @@
       }
       tbody.innerHTML = stocks.map(s => {
         const pct = s.change_pct || 0;
-        const color = pct >= 0 ? '#00e676' : '#ff5252';
+        const color = pct >= 0 ? '#ff5252' : '#00e676';
         const sign = pct >= 0 ? '+' : '';
         const inWL = watchlistCodes.has(s.code);
-        const btnClass = inWL ? 'btn-wl-remove' : 'btn-wl-add';
-        const btnLabel = inWL ? '\u2212' : '+';
         return `<tr>
           <td><code>${s.code}</code></td>
           <td>${s.name}</td>
           <td style="color:${color}">${sign}${pct.toFixed(2)}%</td>
           <td>${(s.turnover || 0).toFixed(1)}%</td>
-          <td><button class="${btnClass}" onclick="toggleWatchlist('${s.code}', this)" title="${inWL ? '移出自选' : '加入自选'}">${btnLabel}</button></td>
+          <td><button class="${inWL ? 'btn-wl-remove' : 'btn-wl-add'}" onclick="toggleWatchlist('${s.code}', this)">${inWL ? '−' : '+'}</button></td>
         </tr>`;
       }).join('');
     } catch (e) {
       tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#ff5252;">加载失败</td></tr>';
     }
   }
-  function closeStockModal() {
-    document.getElementById('stock-modal').style.display = 'none';
-  }
+  function closeStockModal() { document.getElementById('stock-modal').style.display = 'none'; }
 
   // 页面加载时拉取板块数据
-  console.log('[treemap] 启动加载，当前模式: sector');
   loadTreemap('sector');
 
-  // ========== 原有卖出弹窗 ==========
-
+  // ========== 卖出弹窗 ==========
   function updatePreview() {
     const price = parseFloat(document.getElementById('sell-price-input').value) || 0;
     const shares = parseInt(document.getElementById('sell-shares-input').value) || 0;
@@ -478,40 +967,30 @@
 
   function deleteTrade(id) {
     if (!confirm('确认删除交易 ' + id + '？')) return;
-    fetch('/trade/delete/' + id, { method: 'POST' })
-      .then(() => location.reload());
+    fetch('/trade/delete/' + id, { method: 'POST' }).then(() => location.reload());
   }
 
   // ========== 自选股 ==========
-
   let watchlistCodes = new Set({{ watchlist_codes|tojson }});
-  // 页面加载时获取最新自选股行情（填补无服务端渲染数据的股票）
   reloadWatchlist();
 
   async function toggleWatchlist(code, btn) {
     try {
       const resp = await fetch('/api/watchlist/toggle', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({code: code})
       });
       const data = await resp.json();
       if (!data.ok) return;
       if (data.in_watchlist) {
         watchlistCodes.add(code);
-        btn.className = 'btn-wl-remove';
-        btn.textContent = '\u2212';
-        btn.title = '移出自选';
+        btn.className = 'btn-wl-remove'; btn.textContent = '−'; btn.title = '移出自选';
       } else {
         watchlistCodes.delete(code);
-        btn.className = 'btn-wl-add';
-        btn.textContent = '+';
-        btn.title = '加入自选';
+        btn.className = 'btn-wl-add'; btn.textContent = '+'; btn.title = '加入自选';
       }
       reloadWatchlist();
-    } catch (e) {
-      console.error('Toggle watchlist failed:', e);
-    }
+    } catch (e) {}
   }
 
   async function reloadWatchlist() {
@@ -532,24 +1011,34 @@
       if (tbody) {
         tbody.innerHTML = stocks.map(w => {
           const pct = w.change_pct || 0;
-          const color = pct >= 0 ? 'green' : 'red';
+          const color = pct >= 0 ? 'up' : 'down';
           const sign = pct >= 0 ? '+' : '';
           const action = w.is_held
             ? '<span class="held-tag">已持仓</span>'
             : `<button type="button" onclick="showAddForCode('${w.code}', ${w.price})" class="btn-primary btn-sm">买入</button>`;
-          return `<tr>
-            <td><code>${w.code}</code></td>
+          return `<tr data-code="${w.code}">
+            <td><code>${w.code }}</code></td>
             <td>${w.name}</td>
             <td>${w.price > 0 ? '¥' + w.price.toFixed(2) : '—'}</td>
             <td class="${color}">${sign}${pct.toFixed(2)}%</td>
             <td>${w.sector}</td>
             <td>${action}</td>
+            <td><button type="button" onclick="removeFromWatchlist('${w.code}')" class="btn-del">−</button></td>
           </tr>`;
         }).join('');
       }
-    } catch (e) {
-      console.error('reloadWatchlist failed:', e);
-    }
+    } catch (e) {}
+  }
+
+  async function removeFromWatchlist(code) {
+    try {
+      const resp = await fetch('/api/watchlist/toggle', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({code: code})
+      });
+      const data = await resp.json();
+      if (data.ok) { watchlistCodes.delete(code); reloadWatchlist(); }
+    } catch (e) {}
   }
 
   function showAddForCode(code, price) {
