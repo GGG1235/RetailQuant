@@ -1,0 +1,15 @@
+[project]
+name = "retailquant"
+version = "0.1.0"
+description = "A 股个人量化看板 — Flask + 缠论近似 + 板块 Treemap + 自选股 + 数据源池"
+requires-python = ">=3.9"
+dependencies = [
+    "flask>=3.0",
+    "waitress>=3.0",
+    "pandas>=2.0",
+    "requests>=2.30",
+    "squarify>=0.4",
+]
+
+[tool.ruff]
+# Use ruff defaults — no extra rules beyond standard

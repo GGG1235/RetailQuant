@@ -15,8 +15,17 @@ A 股个人量化看板（单实例、本地优先、零外部账号）—— Fl
 
 ## 启动
 
+### 方式一：uv（推荐）
+
 ```bash
-cd /Users/ggg1235/Downloads/rQuant
+uv sync                     # 创建虚拟环境 + 安装依赖
+uv run python app.py        # 启动
+# 浏览器访问 http://localhost:8080
+```
+
+### 方式二：pip
+
+```bash
 pip install -r requirements.txt
 python3 app.py
 # 浏览器访问 http://localhost:8080
@@ -25,6 +34,8 @@ python3 app.py
 自定义端口：
 
 ```bash
+RQUANT_PORT=5060 uv run python app.py
+# 或
 RQUANT_PORT=5060 python3 app.py
 ```
 
@@ -191,7 +202,8 @@ rQuant/
 ├── datasources.py      # 数据源池（Protocol + SinaKlineSource + SinaQuoteSource + Pool）
 ├── strategy.py         # 缠论近似 + BuyHold + 卖出信号
 ├── portfolio.py        # 持仓管理（JSON 存储）
-├── requirements.txt    # flask / waitress / pandas / requests / squarify
+├── pyproject.toml      # 项目元数据 + 依赖声明（uv 管理）
+├── requirements.txt    # 锁定依赖（uv pip compile 生成）
 ├── _test_api.py        # 备选数据源探针（nufm.dfcfw.com，未启用）
 ├── _test_sina.py       # 板块接口冒烟测试
 ├── templates/
