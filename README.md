@@ -2,8 +2,9 @@
 
 A 股个人量化看板（单实例、本地优先、零外部账号）—— Flask + 缠论近似 + 板块 Treemap + 自选股 + 数据源池。
 
-- ✅ 缠论近似（MA5 > MA20 + 站上 MA5 → 买入信号）
-- ✅ Buy & Hold 近似（现价 < MA60 × 0.95 → 低吸信号）
+> 📖 **9 个策略的详细说明**（触发条件、信心度算法、参数、适用场景）见 [`STRATEGIES.md`](STRATEGIES.md)。本文档专注架构、启动、修改记录。
+
+- ✅ **策略引擎**（6 大类 / 7 个策略：缠论 / 量价突破 / 海龟 / 多因子 / ETF 轮动 / 网格 / 游资）
 - ✅ 止损 / 止盈信号（-7% / +15% / 跌破 MA60）
 - ✅ Flask + 看板（持仓、信号、资金曲线）
 - ✅ 加仓 / 减仓 / 删除交易
@@ -54,6 +55,146 @@ uv run ruff format   # 代码自动格式化
 ---
 
 ## 修改记录
+
+### 2026-06-17 · 策略引擎 v1（6 大类 / 7 个策略 / 0 业务变更）
+
+#### 6 大类策略
+
+| 大类 | 策略 | 信号 | 数据需求 |
+|---|---|---|---|
+| `volume_breakout` | **VpBreakout** | 突破 20 日新高 + 量比 ≥ 1.5 + 强势收盘 | 日 K |
+| `turtle` | **DonchianTurtle** | 20 日新高入场，10 日新低离场（2×ATR 止损） | 日 K |
+| `etf_rotation` | **CrossBorderDca** | 跨境 ETF MA60 下方 + RSI<35 → 加仓 | 日 K |
+| `etf_rotation` | **DividendLowvolRotation** | 红利低波 20 日动量 + 放量 → 持有 | 日 K + 动量 |
+| `factor` | **MultiFactor** | 动量+RSI+量比-波动率 综合得分 | 日 K（⚠️ 财务因子待东财/聚宽） |
+| `grid` | **GridMartingale** | 日线波动率网格 + 马丁加仓预警 | 日 K（⚠️ 理想用分钟级） |
+| `pattern` | **DragonTigerPattern** | 涨停/连板形态（涨幅 ≥ 9.5% 近似） | 日 K（⚠️ 待涨停板接口） |
+| `legacy` | **ChanLun2B** | **优化版**：底分型(5日窗口)+突破+多头排列+量能+RSI 7 重过滤 | 日 K |
+| `legacy` | **BuyHold** | **优化版**：超跌+超卖+缩量+止跌 4 重确认 | 日 K |
+
+#### 目录结构
+
+```
+strategies/
+├── __init__.py            # 入口：自动注册 + scan_stock / scan_sell
+├── base.py                # Strategy Protocol + Signal dataclass + 指标工具
+├── registry.py            # @register + STRATEGIES 字典
+├── etf_rotation/
+│   ├── cross_border_dca.py
+│   ├── dividend_lowvol_rotation.py
+│   └── universe.py        # ETF 池子（跨境 + 红利低波）
+├── volume_breakout/vp_breakout.py
+├── turtle/donchian.py
+├── factor/multi_factor.py
+├── grid/grid_martingale.py
+└── pattern/dragon_tiger.py
+```
+
+#### 统一接口
+
+```python
+@dataclass
+class Signal:
+    code, name, sector, strategy, category
+    current_price, suggested_buy, stop_loss, take_profit
+    reason, confidence
+    extra: dict  # 策略特有字段（kind/分数/原始指标）
+```
+
+每个策略实现：
+
+```python
+class VpBreakout:
+    name = "VpBreakout"
+    category = "volume_breakout"
+    description = "..."
+
+    def signal_buy(self, code, name, sector, df) -> Signal | None: ...
+    def signal_sell(self, position, df) -> dict | None: ...
+```
+
+#### 一键调用
+
+```python
+import strategy
+
+# 跑所有 7 个策略
+sigs = strategy.scan_stock(code, name, sector, df)
+
+# 按大类过滤
+sigs = strategy.scan_category("turtle", code, name, sector, df)
+
+# 卖出
+sig = strategy.sell_signal(position, df)
+
+# 看注册了哪些策略
+for s in strategy.all_strategies():
+    print(s.category, s.name, s.description)
+```
+
+#### 扩展一个新策略
+
+```python
+# strategies/xxx/yyy.py
+from ..base import Signal, ma
+from ..registry import register
+
+@register
+class MyStrategy:
+    name = "MyStrategy"
+    category = "xxx"
+    description = "我的策略"
+
+    def signal_buy(self, code, name, sector, df) -> Signal | None:
+        if df is None or len(df) < 20:
+            return None
+        ...
+        return Signal(...)
+
+    def signal_sell(self, position, df) -> dict | None:
+        ...
+```
+
+`strategies/__init__.py` 的 import 触发 `@register`，**新策略 0 配置接入**。
+
+#### 数据降级说明
+
+| 策略 | 缺失能力 | 当前近似方式 | 升级方向 |
+|---|---|---|---|
+| MultiFactor | 财务数据（PE/PB/股息率/ROE） | 只用 K线因子（动量/RSI/量比/波动率） | 接东财/聚宽 → 加财务因子 |
+| GridMartingale | 分钟级 K 线 | 用日线波动率算网格 | 接分钟线 → 高频网格 |
+| DragonTigerPattern | 涨停板/连板/龙虎榜 | 涨幅 ≥ 9.5% 近似涨停 | 接涨停板接口 + 板块成分股 |
+
+所有降级在 `Signal.extra.need_data_source` 字段明示。
+
+#### 老策略优化
+
+老的 `ChanLun2B` 和 `BuyHold` 从 1 个条件升级到 4-7 个条件，并拆到 `strategies/legacy/`，接入新引擎自动注册：
+
+| 策略 | 老版 | 优化版 |
+|---|---|---|
+| `ChanLun2B` | MA5 上穿 MA20（1 个条件，假信号多） | 底分型（5日窗口）+ 突破 + MA5>MA10>MA20 多头排列 + MA60↑ + 量能 ≥ 1.3×5日均量 + 强势收盘 + RSI≥50（7 重过滤） |
+| `BuyHold` | 现价 < MA60×0.95（1 个条件） | 20 日跌幅 > 10% + MA60 距离 -35%~-5% + RSI < 30 + 3日/20日量比 < 0.7（缩量见底）+ 当日反弹 + 最近 3 日有阴线（4 重确认） |
+
+#### 兼容
+
+- `strategy.py` 变成兼容层（薄包装），老的 `chanlun2b_signal / buyhold_signal / scan_stock / sell_signal` **全部保留**
+- `app.py` / `portfolio.py` **零改动**
+
+#### 验证
+
+```
+ruff check    → All checks passed!
+ruff format   → 全部格式化
+策略注册       → 9 个（6 大类 + legacy 优化版）
+模拟 K 线单测  → ChanLun2B conf=79.8 触发（底分型+突破+多头排列+放量）
+                BuyHold conf=85.0 触发（-25% 超跌+RSI 18+缩量止跌）
+杂乱反例       → 全部不触发 ✓
+老 API 兼容    → chanlun2b_signal / buyhold_signal 仍可用
+真实 K 线      → sh600460 命中 2 信号，sh512010 命中 1 信号
+```
+
+---
 
 ### 2026-06-17 · 数据源池化重构（业务层净减 95 行，0 接口变更）
 
@@ -209,8 +350,19 @@ rQuant/
 ├── board.py            # 板块行情业务层（SECTOR_ETFS 映射 + 2 分钟缓存 + Treemap 坐标）
 ├── data.py             # K 线 wrapper + 自选股 + 内存股票字典 + 标的池
 ├── datasources.py      # 数据源池（Protocol + SinaKlineSource + SinaQuoteSource + Pool）
-├── strategy.py         # 缠论近似 + BuyHold + 卖出信号
+├── strategy.py         # 兼容层（老 API + 转发到 strategies）
+├── STRATEGIES.md       # 9 个策略详细文档（条件/参数/适用场景）
 ├── portfolio.py        # 持仓管理（JSON 存储）
+├── strategies/         # 策略引擎（6 大类 / 7 个策略）
+│   ├── base.py         #   Strategy Protocol + Signal + 指标工具
+│   ├── registry.py     #   @register + STRATEGIES
+│   ├── etf_rotation/   #   跨境定投 + 红利低波轮动
+│   ├── volume_breakout/#   量价共振突破
+│   ├── turtle/         #   海龟/唐奇安
+│   ├── factor/         #   多因子选股
+│   ├── grid/           #   网格/马丁
+│   ├── pattern/        #   游资形态
+│   └── legacy/         #   老策略优化版（chanlun2b / buyhold）
 ├── pyproject.toml      # 项目元数据 + 依赖声明（uv 管理）
 ├── requirements.txt    # 锁定依赖（uv pip compile 生成）
 ├── _test_api.py        # 备选数据源探针（nufm.dfcfw.com，未启用）

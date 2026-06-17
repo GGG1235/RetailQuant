@@ -1,138 +1,65 @@
 """
-rQuant.strategy
-- ChanLun2BApprox：MA5 上穿 MA20 → 买入信号
-- BuyHold：买入持有，跌破 MA60 卖出（最简择时）
-- 不做仓位管理、不做市场状态判断、不做宏观
+rQuant.strategy — 兼容层
+- 老的 app.py / 测试可能 import 这个文件
+- 内部从 strategies 包 re-export，旧 API 仍然能用
+- 老的 chanlun2b_signal / buyhold_signal 已升级到 strategies/legacy/ 下的优化版
+- 新代码请直接 from strategies import ...
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
 
+# 转发到新的 strategies 包
+from strategies import (
+    Signal,
+    STRATEGIES,
+    all_strategies,
+    by_category,
+    categories,
+    scan_sell,
+    scan_stock,
+)
+from strategies.legacy.buyhold import BuyHold
+from strategies.legacy.chanlun2b import ChanLun2B
 
-@dataclass
-class Signal:
-    """单只股票的信号"""
-
-    code: str
-    name: str
-    sector: str
-    strategy: str  # "ChanLun2B" / "BuyHold"
-    current_price: float
-    suggested_buy: float
-    stop_loss: float
-    take_profit: float
-    reason: str
-    confidence: float  # 0-100
-    market_state: str = "SIDEWAYS"
-
-
-def _calc_ma(df: pd.DataFrame, n: int) -> float:
-    if len(df) < n:
-        return float(df["close"].iloc[-1])
-    return float(df["close"].tail(n).mean())
+# ============== 老 API 兼容（薄包装）==============
+# 单函数接口：直接调用优化版策略的 signal_buy
+_buyhold_instance = BuyHold()
+_chanlun2b_instance = ChanLun2B()
 
 
 def chanlun2b_signal(code: str, name: str, sector: str, df: pd.DataFrame) -> Signal | None:
-    """缠论二买近似：站上 MA5 + MA5 > MA20 → 买入
-    最简版：只做这一个条件，不加缩量、不加其他过滤器
-    """
-    if df is None or len(df) < 25:
-        return None
-    close = float(df["close"].iloc[-1])
-    ma5 = _calc_ma(df, 5)
-    ma20 = _calc_ma(df, 20)
-    prev_close = float(df["close"].iloc[-2])
-    prev_ma5 = float(df["close"].iloc[-6:-1].mean())  # 昨天 MA5
-
-    # 站上 MA5 + MA5 > MA20 + 昨天收盘 < 昨天 MA5（确认上穿）
-    if not (close > ma5 > ma20 and prev_close < prev_ma5):
-        return None
-
-    suggested = round(close * 1.005, 2)  # 建议买入 = 现价 +0.5%（不强求不踏空）
-    return Signal(
-        code=code,
-        name=name,
-        sector=sector,
-        strategy="ChanLun2B",
-        current_price=close,
-        suggested_buy=suggested,
-        stop_loss=round(suggested * 0.93, 2),  # -7%
-        take_profit=round(suggested * 1.15, 2),  # +15%
-        reason=f"站上 MA5({ma5:.2f}) + MA5>MA20({ma20:.2f})",
-        confidence=80,
-    )
+    """缠论二买（优化版）—— 6 重过滤：底分型+多头排列+MA60↑+量能+强势收盘+RSI"""
+    return _chanlun2b_instance.signal_buy(code, name, sector, df)
 
 
 def buyhold_signal(code: str, name: str, sector: str, df: pd.DataFrame) -> Signal | None:
-    """Buy & Hold 近似：现价 < MA60 的 95% → 触发"加仓"信号
-    最简：低位吸筹
-    """
-    if df is None or len(df) < 60:
-        return None
-    close = float(df["close"].iloc[-1])
-    ma60 = _calc_ma(df, 60)
-    if close >= ma60 * 0.95:
-        return None
-    return Signal(
-        code=code,
-        name=name,
-        sector=sector,
-        strategy="BuyHold",
-        current_price=close,
-        suggested_buy=round(close * 1.005, 2),
-        stop_loss=round(close * 0.90, 2),
-        take_profit=round(close * 1.20, 2),
-        reason=f"现价 ¥{close:.2f} < MA60×0.95（¥{ma60 * 0.95:.2f}）",
-        confidence=60,
-    )
+    """Buy & Hold 低吸（优化版）—— 4 重确认：超跌+超卖+缩量+止跌"""
+    return _buyhold_instance.signal_buy(code, name, sector, df)
 
 
-def scan_stock(code: str, name: str, sector: str, df: pd.DataFrame) -> list[Signal]:
-    """对单只股票跑所有策略，返回命中的信号列表"""
-    signals: list[Signal] = []
-    for sig in (
-        chanlun2b_signal(code, name, sector, df),
-        buyhold_signal(code, name, sector, df),
-    ):
-        if sig is not None:
-            signals.append(sig)
-    return signals
+def scan_stock_legacy(code: str, name: str, sector: str, df: pd.DataFrame) -> list[Signal]:
+    """老的 scan_stock —— 跑所有策略（包含 legacy）"""
+    return scan_stock(code, name, sector, df)
 
 
 def sell_signal(position: dict[str, Any], df: pd.DataFrame) -> dict[str, Any] | None:
-    """对单只持仓判断卖出（最简：跌破 MA60 触发卖出）
-    position: {code, name, avg_cost, shares, ...}
-    返回 None 或 {reason, suggested_price, urgency}
-    """
-    if df is None or len(df) < 60:
-        return None
-    close = float(df["close"].iloc[-1])
-    ma60 = _calc_ma(df, 60)
-    avg_cost = position.get("avg_cost", 0)
-    pnl_pct = (close / avg_cost - 1) * 100 if avg_cost > 0 else 0
+    """老的 sell_signal —— 跑所有策略的卖出信号"""
+    return scan_sell(position, df)
 
-    # 1. 止损 -7%
-    if pnl_pct <= -7:
-        return {
-            "reason": f"触发 -7% 止损线（当前 {pnl_pct:+.1f}%）",
-            "suggested_price": round(close * 0.99, 2),
-            "urgency": "urgent",
-        }
-    # 2. 止盈 +15%
-    if pnl_pct >= 15:
-        return {
-            "reason": f"达到 +15% 止盈线（当前 {pnl_pct:+.1f}%）",
-            "suggested_price": round(close * 0.995, 2),
-            "urgency": "normal",
-        }
-    # 3. 跌破 MA60
-    if close < ma60 * 0.95:
-        return {
-            "reason": f"跌破 MA60×0.95（¥{ma60 * 0.95:.2f}）",
-            "suggested_price": round(close * 0.99, 2),
-            "urgency": "normal",
-        }
-    return None
+
+# 兼容老 import
+__all__ = [
+    "Signal",
+    "STRATEGIES",
+    "all_strategies",
+    "by_category",
+    "categories",
+    "chanlun2b_signal",
+    "buyhold_signal",
+    "scan_stock",
+    "scan_stock_legacy",
+    "sell_signal",
+]
