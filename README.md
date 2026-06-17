@@ -42,6 +42,15 @@ RQUANT_PORT=5060 python3 app.py
 > 没有 waitress 时自动 fallback 到 Flask dev server。
 > 启动方式默认双栈监听（IPv4 + IPv6），`localhost` / `127.0.0.1` / `[::1]` 都能访问。
 
+## 代码检查
+
+```bash
+uv run ruff check    # 代码规范检查
+uv run ruff format   # 代码自动格式化
+```
+
+> ruff 已声明在 `pyproject.toml` 的 `dev` 依赖组中，`uv sync` 会自动安装，无需系统级安装。
+
 ---
 
 ## 修改记录
