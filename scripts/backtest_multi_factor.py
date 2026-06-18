@@ -222,10 +222,10 @@ class BacktestEngine:
 
                     # 止盈
                     if pnl_pct >= self.strategy.TAKE_PROFIT * 100:
-                        to_sell.append((code, f"止盈+{self.strategy.TAKE_PROFIT*100:.0f}%", close))
+                        to_sell.append((code, f"止盈+{self.strategy.TAKE_PROFIT * 100:.0f}%", close))
                     # 止损
                     elif pnl_pct <= self.strategy.STOP_LOSS * 100:
-                        to_sell.append((code, f"止损{self.strategy.STOP_LOSS*100:.0f}%", close))
+                        to_sell.append((code, f"止损{self.strategy.STOP_LOSS * 100:.0f}%", close))
                     # 满期
                     elif hold_days >= self.strategy.MAX_HOLD_DAYS:
                         to_sell.append((code, f"满期{hold_days}日", close))
@@ -297,7 +297,9 @@ class BacktestEngine:
                             net = gross - fee
                             pnl = net - pos["cost"]
                             pnl_pct = pnl / pos["cost"] * 100 if pos["cost"] > 0 else 0
-                            hold_days = i - common_dates.index(pos["buy_date"]) if pos["buy_date"] in common_dates else 0
+                            hold_days = (
+                                i - common_dates.index(pos["buy_date"]) if pos["buy_date"] in common_dates else 0
+                            )
                             cash += net
                             trades.append(
                                 Trade(
@@ -382,7 +384,9 @@ class BacktestEngine:
             net = gross - fee
             pnl = net - pos["cost"]
             pnl_pct = pnl / pos["cost"] * 100 if pos["cost"] > 0 else 0
-            hold_days = len(common_dates) - 1 - common_dates.index(pos["buy_date"]) if pos["buy_date"] in common_dates else 0
+            hold_days = (
+                len(common_dates) - 1 - common_dates.index(pos["buy_date"]) if pos["buy_date"] in common_dates else 0
+            )
             cash += net
             trades.append(
                 Trade(
@@ -463,7 +467,9 @@ class BacktestEngine:
         print(f"🔄 总交易笔数: {r.total_trades}")
         print(f"   买入: {sum(1 for t in r.trades if t['side'] == 'BUY')}")
         print(f"   卖出: {sum(1 for t in r.trades if t['side'] == 'SELL')}")
-        print(f"✅ 胜率（按笔）: {r.win_rate_pct:.1f}%（{r.win_count}/{sum(1 for t in r.trades if t['side'] == 'SELL')}）")
+        print(
+            f"✅ 胜率（按笔）: {r.win_rate_pct:.1f}%（{r.win_count}/{sum(1 for t in r.trades if t['side'] == 'SELL')}）"
+        )
         print(f"⏱  平均持仓天数: {r.avg_hold_days:.1f}")
         print()
         if r.trades:

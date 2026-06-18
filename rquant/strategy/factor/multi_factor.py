@@ -270,9 +270,7 @@ class MultiFactor:
             },
         }
 
-    def score_batch(
-        self, code_df_map: dict[str, pd.DataFrame], name_map: dict[str, str] | None = None
-    ) -> list[dict]:
+    def score_batch(self, code_df_map: dict[str, pd.DataFrame], name_map: dict[str, str] | None = None) -> list[dict]:
         """批量打分 + 横截面 rank（回测用）
 
         返回按 score 降序排的列表，每项 {code, name, score, rank, factors}
@@ -323,9 +321,7 @@ class MultiFactor:
             suggested_buy=suggested,
             stop_loss=round(suggested * (1 + self.STOP_LOSS), 2),
             take_profit=round(suggested * (1 + self.TAKE_PROFIT), 2),
-            reason=(
-                f"多因子综合 {s:+.2f}（{len(f)} 因子）| Top3: {top3_str}"
-            ),
+            reason=(f"多因子综合 {s:+.2f}（{len(f)} 因子）| Top3: {top3_str}"),
             confidence=confidence,
             extra={
                 "score": round(s, 3),
