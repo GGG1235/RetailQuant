@@ -147,6 +147,9 @@ html, body {
 .cards-6 { grid-template-columns: repeat(6, 1fr); }
 @media (max-width: 1200px) { .cards-6 { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 600px) { .cards-6 { grid-template-columns: repeat(2, 1fr); } }
+.cards-7 { grid-template-columns: repeat(7, 1fr); }
+@media (max-width: 1200px) { .cards-7 { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 600px) { .cards-7 { grid-template-columns: repeat(2, 1fr); } }
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -765,6 +768,21 @@ td.down { color: var(--green); font-weight: 600; }
   color: #001;
   font-weight: 600;
 }
+.btn-topup {
+  background: linear-gradient(135deg, #f9a825, #ffb300);
+  color: #1a1a1a;
+  font-weight: 600;
+  margin-right: 6px;
+}
+.btn-topup:hover { background: linear-gradient(135deg, #ffb300, #ffc107); transform: translateY(-1px); }
+.btn-withdraw {
+  background: var(--red-bg);
+  color: var(--red);
+  border: 1px solid rgba(255, 82, 82, 0.3);
+  font-weight: 600;
+  margin-right: 6px;
+}
+.btn-withdraw:hover { background: rgba(255, 82, 82, 0.2); }
 .btn-view { background: var(--bg-card-2); color: var(--cyan); border: 1px solid var(--border); }
 .btn-view:hover { background: rgba(0, 212, 255, 0.1); border-color: var(--cyan); }
 .held-tag { font-size: 11px; color: var(--cyan); background: rgba(0, 212, 255, 0.1); padding: 2px 6px; border-radius: 4px; }

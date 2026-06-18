@@ -10,3 +10,15 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local cache databases
+cache/*.db
+cache/*.db-shm
+cache/*.db-wal
+
+# Runtime data (local only, do not commit)
+data/portfolio.json
+data/trades.json
+data/funds.json
+data/users.json
+data/parquet/

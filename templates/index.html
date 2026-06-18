@@ -41,17 +41,25 @@
     {% endwith %}
 
     <!-- ====== 1. 6 张统计卡片（Hero） ====== -->
-    <div class="cards cards-6">
+    <div class="cards cards-7">
       <div class="card">
         <div class="card-icon">💰</div>
         <div class="card-body">
           <div class="label">总资产</div>
-          <div class="value">¥<span id="count-total-assets">{{ "{:,.0f}".format(total_market) }}</span></div>
-          <div class="card-sub">资产净值</div>
+          <div class="value">¥<span id="count-total-assets">{{ "{:,.0f}".format(total_assets) }}</span></div>
+          <div class="card-sub">现金 + 持仓市值</div>
         </div>
       </div>
       <div class="card">
-        <div class="card-icon">💰</div>
+        <div class="card-icon">💵</div>
+        <div class="card-body">
+          <div class="label">可用资金</div>
+          <div class="value">¥<span id="count-available-funds">{{ "{:,.0f}".format(available_funds) }}</span></div>
+          <div class="card-sub">还可用于买入</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-icon">📊</div>
         <div class="card-body">
           <div class="label">总市值</div>
           <div class="value">¥<span id="count-total-market">{{ "{:,.0f}".format(total_market) }}</span></div>
@@ -76,9 +84,9 @@
       <div class="card">
         <div class="card-icon">📦</div>
         <div class="card-body">
-          <div class="label">持仓数</div>
-          <div class="value"><span id="count-positions">{{ positions|length }}</span></div>
-          <div class="card-sub">只持仓股票</div>
+          <div class="label">仓位占比</div>
+          <div class="value"><span id="count-positions">{{ "%.1f"|format(position_ratio) }}%</span></div>
+          <div class="card-sub">{{ positions|length }} 只持仓股票</div>
         </div>
       </div>
       <div class="card">
@@ -203,6 +211,8 @@
         <div class="box-head">
           <h2>📦 当前持仓</h2>
           <button onclick="showAddForm()" class="btn-sm btn-add">+ 添加</button>
+          <button onclick="showTopupModal()" class="btn-sm btn-topup" title="充值增加可用资金">💰 充值</button>
+          <button onclick="showWithdrawModal()" class="btn-sm btn-withdraw" title="提现减少可用资金">🏦 提现</button>
         </div>
         <div id="add-form" class="form" style="display:none;">
           <form method="POST" action="{{ url_for('add_position') }}">
@@ -238,9 +248,9 @@
                 <b>{{ '{:+.2f}'.format(p.pnl_pct) }}%</b>
               </td>
               <td>
-                {% set pct = (p.market_value / total_market * 100) if total_market > 0 else 0 %}
+                {% set pct = (p.market_value / total_funds * 100) if total_funds > 0 else 0 %}
                 <div class="pos-bar"><div class="pos-bar-fill" style="width:{{ '%.0f'|format(pct) }}%"></div></div>
-                <span class="pos-pct">{{ '%.0f'|format(pct) }}%</span>
+                <span class="pos-pct">{{ '%.1f'|format(pct) }}%</span>
               </td>
               <td>
                 <button type="button" onclick="showSellForm('{{ p.code }}', {{ p.shares }}, {{ p.current_price }})" class="btn-sell btn-sm">卖出</button>
@@ -267,6 +277,10 @@
             <span class="value"><b>{{ positions|length }}</b> 只</span>
           </div>
           <div class="dist-stat">
+            <span class="label">总资金</span>
+            <span class="value">¥{{ "{:,.0f}".format(total_funds) }}</span>
+          </div>
+          <div class="dist-stat">
             <span class="label">总市值</span>
             <span class="value">¥{{ "{:,.0f}".format(total_market) }}</span>
           </div>
@@ -276,7 +290,7 @@
           </div>
           <div class="dist-stat">
             <span class="label">仓位占比</span>
-            <span class="value">100.00%</span>
+            <span class="value">{{ "%.2f"|format(position_ratio) }}%</span>
           </div>
         </div>
         <div class="chart-wrapper dist-chart">
@@ -470,6 +484,35 @@
     </div>
   </div>
 
+  <!-- 充值弹窗 -->
+  <div id="topup-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <h3>💰 账户充值</h3>
+      <p style="color:#888;">当前可用资金：¥<span id="topup-current-funds">{{ "{:,.0f}".format(available_funds) }}</span></p>
+      <label>充值金额 <input type="number" id="topup-amount" placeholder="例如 100000" min="1" step="1" required></label>
+      <div style="margin-top:14px;">
+        <button type="button" onclick="doTopup()" class="btn-primary">确认充值</button>
+        <button type="button" onclick="closeTopup()" class="btn">取消</button>
+      </div>
+      <p id="topup-msg" style="margin-top:8px;min-height:20px;"></p>
+    </div>
+  </div>
+
+  <!-- 提现弹窗 -->
+  <div id="withdraw-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <h3>🏦 账户提现</h3>
+      <p style="color:#888;">当前可用资金：¥<span id="withdraw-current-funds">{{ "{:,.0f}".format(available_funds) }}</span></p>
+      <p style="color:#78909c;font-size:12px;">提示：提现最多减少可用资金到零，不会影响已持仓股票</p>
+      <label>提现金额 <input type="number" id="withdraw-amount" placeholder="例如 50000" min="1" step="1" required></label>
+      <div style="margin-top:14px;">
+        <button type="button" onclick="doWithdraw()" class="btn-sell">确认提现</button>
+        <button type="button" onclick="closeWithdraw()" class="btn">取消</button>
+      </div>
+      <p id="withdraw-msg" style="margin-top:8px;min-height:20px;"></p>
+    </div>
+  </div>
+
   <script>
   // ========== 状态信息（页面启动时拉一次） ==========
   document.addEventListener('DOMContentLoaded', () => {
@@ -551,6 +594,7 @@
   {% if positions %}
   (function initPositionChart() {
     const positions = {{ positions|tojson }};
+    const posRatio = {{ position_ratio }};
     const labels = positions.map(p => p.name);
     const data = positions.map(p => p.market_value);
     const colors = [
@@ -563,7 +607,6 @@
     const ctx = document.getElementById('position-chart');
     if (!ctx) return;
     const total = data.reduce((a, b) => a + b, 0);
-    // 在中央显示 100% + 总额
     new Chart(ctx, {
       type: 'doughnut',
       data: {
@@ -616,10 +659,10 @@
           ctx.fillStyle = '#94a3b8';
           ctx.font = '11px Inter, sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText('总市值占比', cx, cy - 12);
+          ctx.fillText('仓位占比', cx, cy - 12);
           ctx.fillStyle = '#fff';
           ctx.font = 'bold 18px Inter, sans-serif';
-          ctx.fillText('100.00%', cx, cy + 12);
+          ctx.fillText(posRatio.toFixed(1) + '%', cx, cy + 12);
           ctx.restore();
         }
       }]
@@ -1046,6 +1089,83 @@
     document.querySelector('#add-form input[name="code"]').value = code;
     if (price > 0) document.querySelector('#add-form input[name="price"]').value = price.toFixed(2);
     document.querySelector('#add-form input[name="shares"]').focus();
+  }
+
+  // ========== 充值与提现 ==========
+  function showTopupModal() {
+    document.getElementById('topup-modal').style.display = 'flex';
+    document.getElementById('topup-amount').value = '';
+    document.getElementById('topup-msg').textContent = '';
+    document.getElementById('topup-amount').focus();
+  }
+  function closeTopup() {
+    document.getElementById('topup-modal').style.display = 'none';
+  }
+  async function doTopup() {
+    const input = document.getElementById('topup-amount');
+    const amount = parseInt(input.value, 10);
+    const msg = document.getElementById('topup-msg');
+    if (!amount || amount <= 0) { msg.textContent = '请输入有效金额'; msg.style.color = '#ef5350'; return; }
+    msg.textContent = '处理中...'; msg.style.color = '#888';
+    try {
+      const resp = await fetch('/api/funds/add', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({amount: amount})
+      });
+      const data = await resp.json();
+      if (data.ok) {
+        msg.textContent = `✅ 充值成功 +¥${data.added.toLocaleString()}，刷新页面...`;
+        msg.style.color = '#4caf50';
+        setTimeout(() => location.reload(), 800);
+      } else {
+        msg.textContent = data.error || '充值失败';
+        msg.style.color = '#ef5350';
+      }
+    } catch (e) {
+      msg.textContent = '网络错误，请重试';
+      msg.style.color = '#ef5350';
+    }
+  }
+
+  function showWithdrawModal() {
+    document.getElementById('withdraw-modal').style.display = 'flex';
+    document.getElementById('withdraw-amount').value = '';
+    document.getElementById('withdraw-msg').textContent = '';
+    document.getElementById('withdraw-amount').focus();
+  }
+  function closeWithdraw() {
+    document.getElementById('withdraw-modal').style.display = 'none';
+  }
+  async function doWithdraw() {
+    const input = document.getElementById('withdraw-amount');
+    const amount = parseInt(input.value, 10);
+    const msg = document.getElementById('withdraw-msg');
+    if (!amount || amount <= 0) { msg.textContent = '请输入有效金额'; msg.style.color = '#ef5350'; return; }
+    msg.textContent = '处理中...'; msg.style.color = '#888';
+    try {
+      const resp = await fetch('/api/funds/withdraw', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({amount: amount})
+      });
+      const data = await resp.json();
+      if (data.ok) {
+        if (data.withdrawn < data.requested) {
+          msg.textContent = `⚠️ 可用资金不足，实际提现 ¥${data.withdrawn.toLocaleString()}，刷新页面...`;
+        } else {
+          msg.textContent = `✅ 提现成功 -¥${data.withdrawn.toLocaleString()}，刷新页面...`;
+        }
+        msg.style.color = '#4caf50';
+        setTimeout(() => location.reload(), 1000);
+      } else {
+        msg.textContent = data.error || '提现失败';
+        msg.style.color = '#ef5350';
+      }
+    } catch (e) {
+      msg.textContent = '网络错误，请重试';
+      msg.style.color = '#ef5350';
+    }
   }
   </script>
 </body>

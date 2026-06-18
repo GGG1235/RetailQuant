@@ -17,7 +17,7 @@ from flask import (
     url_for,
 )
 
-from rquant.business import board, data, portfolio as pf, system
+from rquant.business import board, data, funds, portfolio as pf, system, user as user_mgr
 from rquant.strategy import all_strategies, scan_sell, scan_stock
 
 from .views import (
@@ -63,6 +63,15 @@ def register_routes(app: Flask) -> None:
             total_market += market_value
         total_pnl = total_market - total_cost
         total_pnl_pct = (total_market / total_cost - 1) * 100 if total_cost > 0 else 0
+
+        # 资金/仓位（默认用户）
+        uid = user_mgr.get_default_user().id
+        total_funds_val = funds.get_total_funds(uid)
+        avail_funds = funds.get_available_funds(uid)
+        total_assets = funds.calc_total_assets(uid, total_market)
+        pos_ratio = funds.calc_position_ratio(uid, total_market)
+        invested = funds.get_funds_snapshot(uid).get("total_invested", 0)
+        realized_pnl = funds.get_funds_snapshot(uid).get("realized_pnl", 0)
 
         # 2. 卖出信号
         sell_signals = []
@@ -133,6 +142,12 @@ def register_routes(app: Flask) -> None:
             watchlist_stocks=watchlist_stocks,
             category_options=category_options,
             strategies_by_category=strategies_by_category,
+            total_funds_val=total_funds_val,
+            avail_funds=avail_funds,
+            total_assets=total_assets,
+            pos_ratio=pos_ratio,
+            invested=invested,
+            realized_pnl=realized_pnl,
         )
 
     # ============== 买入 ==============
@@ -310,3 +325,46 @@ def register_routes(app: Flask) -> None:
     def api_system_log():
         """系统日志（最近 50 条，从内存 ring buffer 读）"""
         return jsonify({"logs": system.get_system_log(limit=50)})
+
+    @app.route("/api/funds/add", methods=["POST"])
+    def api_funds_add():
+        """手动充值：同步增加 total_funds 和 available_funds"""
+        uid = user_mgr.get_default_user().id
+        payload = request.get_json(silent=True) or {}
+        amount = _safe_float(payload.get("amount"), 0)
+        if amount <= 0:
+            return jsonify({"ok": False, "error": "金额必须大于0"}), 400
+        result = funds.topup_funds(uid, amount)
+        _log(f"充值: +{amount:,.0f}，总资金 {result['total_funds']:,.0f}，可用 {result['available_funds']:,.0f}")
+        return jsonify(
+            {
+                "ok": True,
+                "added": round(amount, 2),
+                "total_funds": round(result["total_funds"], 2),
+                "available_funds": round(result["available_funds"], 2),
+            }
+        )
+
+    @app.route("/api/funds/withdraw", methods=["POST"])
+    def api_funds_withdraw():
+        """提现：减少 total_funds 和 available_funds，最多清零可用资金"""
+        uid = user_mgr.get_default_user().id
+        payload = request.get_json(silent=True) or {}
+        amount = _safe_float(payload.get("amount"), 0)
+        if amount <= 0:
+            return jsonify({"ok": False, "error": "金额必须大于0"}), 400
+        result = funds.withdraw_funds(uid, amount)
+        actual = result["withdrawn"]
+        if actual < amount:
+            _log(f"提现: 请求 {amount:,.0f}，实际 {actual:,.0f}（可用资金不足，已清零）")
+        else:
+            _log(f"提现: -{actual:,.0f}，总资金 {result['total_funds']:,.0f}，可用 {result['available_funds']:,.0f}")
+        return jsonify(
+            {
+                "ok": True,
+                "requested": round(amount, 2),
+                "withdrawn": actual,
+                "total_funds": round(result["total_funds"], 2),
+                "available_funds": round(result["available_funds"], 2),
+            }
+        )

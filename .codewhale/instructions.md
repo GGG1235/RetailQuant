@@ -94,3 +94,29 @@ Use these principles as a practical checklist when implementing or reviewing cod
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+## 6. Git Commit File-Filtering Guard Rules
+
+**Never blind-stage everything. Always inspect before adding.**
+
+These rules apply whenever the agent is about to run `git add`, `git commit`,
+or any save command that stages files.
+
+### 6.1 Mandatory Pre-Commit Review
+
+Before every `git add` or equivalent, run `git status` and inspect the
+file list. Do not skip this step.
+
+### 6.2 Local Environment Isolation
+
+- **Local-only artifacts must never reach the staging area.**
+  Examples: temporary test scripts (`test_local_*.py`), one-off scratch files,
+  local data dumps, log files.
+- **Frequently re-generated local caches** that are not yet covered by
+  `.gitignore` must be added to `.gitignore` first — **do not commit them
+  directly**.
+
+### 6.3 Precise Add
+
+Prefer `git add <specific file> <specific file>` over `git add .`.
+Only use `git add .` when the working tree is confirmed clean of noise.
