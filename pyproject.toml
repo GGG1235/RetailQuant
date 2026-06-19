@@ -11,6 +11,7 @@ dependencies = [
     "squarify>=0.4",
     "curl-cffi>=0.13.0",
     "akshare>=1.18.64",
+    "pyarrow",
 ]
 
 [dependency-groups]

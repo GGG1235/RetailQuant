@@ -248,7 +248,7 @@
                 <b>{{ '{:+.2f}'.format(p.pnl_pct) }}%</b>
               </td>
               <td>
-                {% set pct = (p.market_value / total_funds * 100) if total_funds > 0 else 0 %}
+                {% set pct = (p.market_value / total_assets * 100) if total_assets > 0 else 0 %}
                 <div class="pos-bar"><div class="pos-bar-fill" style="width:{{ '%.0f'|format(pct) }}%"></div></div>
                 <span class="pos-pct">{{ '%.1f'|format(pct) }}%</span>
               </td>
@@ -277,8 +277,8 @@
             <span class="value"><b>{{ positions|length }}</b> 只</span>
           </div>
           <div class="dist-stat">
-            <span class="label">总资金</span>
-            <span class="value">¥{{ "{:,.0f}".format(total_funds) }}</span>
+            <span class="label">总资产</span>
+            <span class="value">¥{{ "{:,.0f}".format(total_assets) }}</span>
           </div>
           <div class="dist-stat">
             <span class="label">总市值</span>
@@ -389,7 +389,7 @@
         {% if watchlist_stocks %}
         <table class="data-table">
           <thead>
-            <tr><th>代码</th><th>名称</th><th>现价</th><th>涨幅</th><th>板块</th><th>操作</th><th></th></tr>
+            <tr><th>代码</th><th>名称</th><th>现价</th><th>涨幅</th><th>板块</th><th>操作</th><th></th><th></th></tr>
           </thead>
           <tbody id="watchlist-tbody">
             {% for w in watchlist_stocks %}
@@ -400,15 +400,12 @@
               <td class="{% if w.change_pct > 0 %}up{% elif w.change_pct < 0 %}down{% endif %}">
                 {{ '{:+.2f}'.format(w.change_pct) }}%
               </td>
-              <td>{{ w.sector }}</td>
+              <td>{{ w.sector or '—' }}</td>
               <td>
-                {% if w.is_held %}
-                  <span class="held-tag">已持仓</span>
-                {% else %}
-                  <button type="button" onclick="showAddForCode('{{ w.code }}', {{ w.price }})" class="btn-primary btn-sm">买入</button>
-                {% endif %}
+                <button type="button" onclick="showAddForCode('{{ w.code }}', {{ w.price }})" class="btn-primary btn-sm">买入</button>
               </td>
               <td><button type="button" onclick="removeFromWatchlist('{{ w.code }}')" class="btn-del" title="移出自选">−</button></td>
+              <td><button type="button" onclick="showWatchlistAnalysis('{{ w.code }}')" class="btn-sm btn-view">分析</button></td>
             </tr>
             {% endfor %}
           </tbody>
@@ -470,6 +467,19 @@
     </div>
   </div>
 
+  <div id="analysis-modal" class="modal" style="display:none;">
+    <div class="modal-content analysis-modal-content">
+      <h3 id="analysis-modal-title">策略分析</h3>
+      <p id="analysis-modal-meta" class="modal-subtitle"></p>
+      <table class="stock-table analysis-table">
+        <thead><tr><th>策略</th><th>大类</th><th>评分</th><th>状态</th><th>说明</th></tr></thead>
+        <tbody id="analysis-modal-tbody"></tbody>
+      </table>
+      <p id="analysis-modal-empty" style="color:#78909c;text-align:center;display:none;">暂无分析结果</p>
+      <button type="button" onclick="closeAnalysisModal()" class="btn" style="margin-top:14px;">关闭</button>
+    </div>
+  </div>
+
   <div id="sell-modal" class="modal" style="display:none;">
     <div class="modal-content">
       <h3>🔴 卖出 <span id="sell-code"></span></h3>
@@ -514,6 +524,15 @@
   </div>
 
   <script>
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   // ========== 状态信息（页面启动时拉一次） ==========
   document.addEventListener('DOMContentLoaded', () => {
     refreshLastRefresh();
@@ -683,10 +702,10 @@
       if (!c.error) c.start();
     };
     const strip = (s) => parseFloat(String(s).replace(/[^\d.\-]/g, '')) || 0;
-    mk('count-total-assets', strip(document.getElementById('count-total-assets')?.textContent || '0'), 0, '¥', '');
-    mk('count-total-market', strip(document.getElementById('count-total-market')?.textContent || '0'), 0, '¥', '');
+    mk('count-total-assets', strip(document.getElementById('count-total-assets')?.textContent || '0'), 0, '', '');
+    mk('count-total-market', strip(document.getElementById('count-total-market')?.textContent || '0'), 0, '', '');
     mk('count-today-pnl', strip(document.getElementById('count-today-pnl')?.textContent || '0'), 0, '', '');
-    mk('count-positions', strip(document.getElementById('count-positions')?.textContent || '0'), 0, '', '');
+    mk('count-positions', strip(document.getElementById('count-positions')?.textContent || '0'), 1, '', '%');
     mk('count-buy-signals', strip(document.getElementById('count-buy-signals')?.textContent || '0'), 0, '', '');
     mk('count-sell-signals', strip(document.getElementById('count-sell-signals')?.textContent || '0'), 0, '', '');
   });
@@ -1056,17 +1075,15 @@
           const pct = w.change_pct || 0;
           const color = pct >= 0 ? 'up' : 'down';
           const sign = pct >= 0 ? '+' : '';
-          const action = w.is_held
-            ? '<span class="held-tag">已持仓</span>'
-            : `<button type="button" onclick="showAddForCode('${w.code}', ${w.price})" class="btn-primary btn-sm">买入</button>`;
           return `<tr data-code="${w.code}">
             <td><code>${w.code }}</code></td>
             <td>${w.name}</td>
             <td>${w.price > 0 ? '¥' + w.price.toFixed(2) : '—'}</td>
             <td class="${color}">${sign}${pct.toFixed(2)}%</td>
-            <td>${w.sector}</td>
-            <td>${action}</td>
+            <td>${w.sector || '—'}</td>
+            <td><button type="button" onclick="showAddForCode('${w.code}', ${w.price})" class="btn-primary btn-sm">买入</button></td>
             <td><button type="button" onclick="removeFromWatchlist('${w.code}')" class="btn-del">−</button></td>
+            <td><button type="button" onclick="showWatchlistAnalysis('${w.code}')" class="btn-sm btn-view">分析</button></td>
           </tr>`;
         }).join('');
       }
@@ -1089,6 +1106,58 @@
     document.querySelector('#add-form input[name="code"]').value = code;
     if (price > 0) document.querySelector('#add-form input[name="price"]').value = price.toFixed(2);
     document.querySelector('#add-form input[name="shares"]').focus();
+  }
+
+  function closeAnalysisModal() {
+    document.getElementById('analysis-modal').style.display = 'none';
+  }
+
+  async function showWatchlistAnalysis(code) {
+    const modal = document.getElementById('analysis-modal');
+    const title = document.getElementById('analysis-modal-title');
+    const meta = document.getElementById('analysis-modal-meta');
+    const tbody = document.getElementById('analysis-modal-tbody');
+    const empty = document.getElementById('analysis-modal-empty');
+    title.textContent = `策略分析 ${code}`;
+    meta.textContent = '分析中…';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#78909c;">分析中…</td></tr>';
+    empty.style.display = 'none';
+    modal.style.display = 'flex';
+    try {
+      const resp = await fetch('/api/watchlist/analyze/' + code);
+      const data = await resp.json();
+      if (!data.ok) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:#ff5252;">${escapeHtml(data.error || '分析失败')}</td></tr>`;
+        meta.textContent = '';
+        return;
+      }
+      const stock = data.stock || {};
+      title.textContent = `策略分析 ${stock.name || code}`;
+      meta.textContent = `${stock.code || code} · ${stock.sector || '—'} · 现价 ¥${(stock.price || 0).toFixed(2)}`;
+      const rows = data.analyses || [];
+      if (rows.length === 0) {
+        tbody.innerHTML = '';
+        empty.style.display = 'block';
+        return;
+      }
+      tbody.innerHTML = rows.map(a => {
+        const score = Number(a.score || 0).toFixed(1);
+        const state = a.triggered
+          ? '<span class="analysis-hit">触发</span>'
+          : '<span class="analysis-miss">未触发</span>';
+        const reason = escapeHtml(a.reason || '');
+        return `<tr>
+          <td><b>${escapeHtml(a.strategy)}</b><div class="analysis-desc">${escapeHtml(a.description || '')}</div></td>
+          <td>${escapeHtml(a.category_label || a.category || '-')}</td>
+          <td><b class="score-b">${score}</b></td>
+          <td>${state}</td>
+          <td class="reason-cell" title="${reason}">${reason}</td>
+        </tr>`;
+      }).join('');
+    } catch (e) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#ff5252;">网络错误，请重试</td></tr>';
+      meta.textContent = '';
+    }
   }
 
   // ========== 充值与提现 ==========

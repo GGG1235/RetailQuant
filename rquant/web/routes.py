@@ -1,6 +1,6 @@
 """
 rquant.web.routes — Flask 路由
-- 12 个路由：首页 / 买 / 卖 / 删交易 / 快照 / 板块 / 自选股 / 错误
+- 首页 / 买 / 卖 / 删交易 / 快照 / 板块 / 自选股 / 资金 / 系统状态 / 错误
 - 注册到 Flask app 工厂传入的 app
 """
 
@@ -69,7 +69,7 @@ def register_routes(app: Flask) -> None:
         total_funds_val = funds.get_total_funds(uid)
         avail_funds = funds.get_available_funds(uid)
         total_assets = funds.calc_total_assets(uid, total_market)
-        pos_ratio = funds.calc_position_ratio(uid, total_market)
+        pos_ratio = round(total_market / total_assets * 100, 2) if total_assets > 0 else 0.0
         invested = funds.get_funds_snapshot(uid).get("total_invested", 0)
         realized_pnl = funds.get_funds_snapshot(uid).get("realized_pnl", 0)
 
@@ -150,6 +150,7 @@ def register_routes(app: Flask) -> None:
             watchlist_stocks=watchlist_stocks,
             category_options=category_options,
             strategies_by_category=strategies_by_category,
+            total_funds=total_funds_val,  # 模板用 total_funds
             total_funds_val=total_funds_val,
             avail_funds=avail_funds,
             available_funds=avail_funds,  # 模板用 available_funds（兼容老 key 名）
@@ -173,9 +174,16 @@ def register_routes(app: Flask) -> None:
         if shares % 100 != 0:
             flash("股数必须是 100 的整数倍", "error")
             return redirect(url_for("index"))
+        uid = user_mgr.get_default_user().id
+        cost = round(shares * price, 2)
+        available = funds.get_available_funds(uid)
+        if cost > available:
+            flash(f"可用资金不足：需要 ¥{cost:,.2f}，当前可用 ¥{available:,.2f}", "error")
+            return redirect(url_for("index"))
         name = _pool_name_map().get(code, code)
         pf.add_position(code, name, shares, price)
         pf.add_trade("BUY", code, name, shares, price, note="手动买入")
+        funds.deduct_on_buy(uid, cost)
         flash(f"✅ 已买入 {code} {shares} 股 @ ¥{price}", "success")
         return redirect(url_for("index"))
 
@@ -188,15 +196,24 @@ def register_routes(app: Flask) -> None:
         if shares <= 0 or price <= 0:
             flash("请填写股数和价格", "error")
             return redirect(url_for("index"))
+        uid = user_mgr.get_default_user().id
+        position = next((p for p in pf.get_positions() if p["code"] == code), None)
+        if position is None:
+            flash(f"未持有 {code}", "error")
+            return redirect(url_for("index"))
+        cost_released = round(position["avg_cost"] * shares, 2)
+        position_name = position.get("name", code)
         try:
             result = pf.sell_position(code, shares, price)
         except ValueError as e:
             flash(str(e), "error")
             return redirect(url_for("index"))
+        proceeds = round(shares * price, 2)
+        funds.add_on_sell(uid, proceeds, cost_released)
         pf.add_trade(
             "SELL",
             code,
-            result.get("code", code),
+            position_name,
             shares,
             price,
             note=f"盈亏 ¥{result['pnl']:+.2f}",
@@ -308,6 +325,68 @@ def register_routes(app: Flask) -> None:
         rows = _build_watchlist_view(codes, pf.get_positions())
         _log(f"自选股 行情 API: {len(rows)} 只")
         return jsonify({"stocks": rows, "count": len(rows)})
+
+    @app.route("/api/watchlist/analyze/<code>")
+    def api_watchlist_analyze(code):
+        """逐个策略分析自选股，返回每个策略的评分/触发状态"""
+        code = (code or "").strip().lower()
+        if not code:
+            return jsonify({"ok": False, "error": "缺少 code"}), 400
+
+        info = data.get_stock(code)
+        name = info.get("name") or code
+        sector = info.get("sector") or ""
+        df = data.fetch_kline(code, 160)
+        if df.empty:
+            return jsonify({"ok": False, "error": "暂无可分析的 K 线数据", "code": code}), 404
+
+        analyses = []
+        for strat in all_strategies():
+            item = {
+                "strategy": strat.name,
+                "category": strat.category,
+                "category_label": CATEGORY_LABELS.get(strat.category, strat.category),
+                "description": strat.description,
+                "triggered": False,
+                "score": 0.0,
+                "reason": "未触发买入条件",
+                "suggested_buy": None,
+                "stop_loss": None,
+                "take_profit": None,
+            }
+            try:
+                sig = strat.signal_buy(code, name, sector, df)
+            except Exception as e:
+                item["reason"] = f"分析异常：{e}"
+                analyses.append(item)
+                continue
+            if sig is not None:
+                item.update(
+                    {
+                        "triggered": True,
+                        "score": sig.confidence,
+                        "reason": sig.reason,
+                        "suggested_buy": sig.suggested_buy,
+                        "stop_loss": sig.stop_loss,
+                        "take_profit": sig.take_profit,
+                    }
+                )
+            analyses.append(item)
+
+        analyses.sort(key=lambda x: (not x["triggered"], -x["score"], x["strategy"]))
+        _log(f"自选股 分析: {code}，策略 {len(analyses)} 个")
+        return jsonify(
+            {
+                "ok": True,
+                "stock": {
+                    "code": code,
+                    "name": name,
+                    "sector": sector,
+                    "price": round(float(df["close"].iloc[-1]), 2),
+                },
+                "analyses": analyses,
+            }
+        )
 
     # ============== 错误 ==============
 

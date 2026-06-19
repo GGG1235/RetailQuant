@@ -126,7 +126,7 @@ def add_on_sell(user_id: str, proceeds: float, cost_released: float) -> float:
     data = _load(user_id)
     pnl = proceeds - cost_released
     data["available_funds"] = round(data["available_funds"] + proceeds, 2)
-    data["total_invested"] = round(data["total_invested"] - cost_released, 2)
+    data["total_invested"] = round(max(0.0, data["total_invested"] - cost_released), 2)
     data["realized_pnl"] = round(data["realized_pnl"] + pnl, 2)
     _save(user_id, data)
     return data["available_funds"]

@@ -8,12 +8,12 @@
 
 ```
 ┌─ navbar ──────────────────────────────────────────┐
-│ 📊 rQuant          2026-06-18          🔄 刷新    │
+│ rQuant  市场状态  最后刷新              🔄 ⚙️ 用户 │
 └────────────────────────────────────────────────────┘
 ┌─ flash 消息条（条件渲染）──────────────────────────┐
 └────────────────────────────────────────────────────┘
 ┌─ 板块热力图 (Treemap) ────────────────────────────┐
-│ 🗺️ 板块热力图  [行业板块] [概念板块]   面积∝涨跌幅 │
+│ 🗺️ 板块热力图  [行业板块] [概念板块]   颜色=涨跌幅 │
 │ ┌──────────────────────────────────────────────┐  │
 │ │          Canvas 900×500                      │  │
 │ │  ┌────┐ ┌───┐ ┌──────┐                      │  │
@@ -22,26 +22,30 @@
 │ └──────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────┘
 ┌─ 顶部卡片 ────────────────────────────────────────┐
-│  总成本    总市值     总盈亏(红/绿)   持仓数        │
+│ 总资产 可用资金 总市值 今日盈亏 仓位 买入信号 卖出提示 │
 └────────────────────────────────────────────────────┘
-┌─ 信号区 (row: 1fr 1fr) ───────────────────────────┐
-│ 📉 卖出提示 [N]      │  🔥 买入信号 [N]           │
+┌─ 第一行：板块热力图 + 今日决策 ────────────────────┐
+│ 板块热力图         │ 卖出提示 + 买入信号 Top5      │
 │ ┌─────────────────┐  │ ┌──────────────────────┐  │
 │ │ [urgent] 止损   │  │ │ ChanLun2B / BuyHold  │  │
 │ │ 建议卖 ¥xx.xx   │  │ │ 现价→买价 止损 止盈   │  │
 │ └─────────────────┘  │ └──────────────────────┘  │
 └────────────────────────────────────────────────────┘
-┌─ 持仓 + 自选股 (row: 1fr 1fr) ────────────────────┐
-│ 📦 当前持仓 [+添加]   │ ⭐ 自选股 [N] [input][+]  │
+┌─ 第二行：当前持仓 + 持仓分布 ──────────────────────┐
+│ 📦 当前持仓 [+添加][充值][提现] │ 🥧 持仓分布       │
 │ ┌─────────────────┐  │ ┌──────────────────────┐  │
 │ │ 代码 名称 股数  │  │ │ 代码 名称 现价 涨幅  │  │
-│ │ 成本 现价 市值  │  │ │ 板块 [买入/已持仓]   │  │
-│ │ 盈亏 [卖]      │  │ │ 🔍  −               │  │
+│ │ 成本 现价 市值  │  │ │ 板块 [买入][−][分析] │  │
+│ │ 盈亏 [卖]      │  │ │ 饼图 + 仓位统计       │  │
 │ └─────────────────┘  │ └──────────────────────┘  │
 └────────────────────────────────────────────────────┘
-┌─ 交易历史（条件渲染）──────────────────────────────┐
-│ 📜 交易历史                                      │
-│ ID 日期 方向 代码 名称 股数 价格 备注 [删]        │
+┌─ 买入信号列表（可按策略大类/策略名筛选）────────────┐
+└────────────────────────────────────────────────────┘
+┌─ 交易历史（条件渲染，可折叠）──────────────────────┐
+└────────────────────────────────────────────────────┘
+┌─ 自选股 + 策略状态 ───────────────────────────────┐
+└────────────────────────────────────────────────────┘
+┌─ 系统日志（10 秒刷新）─────────────────────────────┐
 └────────────────────────────────────────────────────┘
 ```
 
@@ -59,9 +63,13 @@
 
 | 元素 | 样式 | 作用 | 触发函数 |
 |---|---|---|---|
-| `📊 rQuant` | `.logo` — 字号 18px，粗体，色 `#00d4ff` | 品牌标识 | 无 |
-| `{{ today }}` | `.date` — 等宽字体，色 `#b0bec5` | 显示当前日期 | 无（服务端渲染） |
-| `🔄 刷新` | `.btn-sm` — 青色边框，圆角 4px | 整页刷新 | `location.reload()` |
+| `rQuant` | `.logo` 渐变文字 | 品牌标识 | 无 |
+| `{{ today }}` | `#nav-date` | 显示当前日期 | 服务端渲染 |
+| 市场状态 | `#state-label` + `.state-dot` | 显示开盘/休市状态 | `reloadMarketStatus()` |
+| 最后刷新 | `#last-refresh` | 每秒更新时间 | `refreshLastRefresh()` |
+| `🔄` | `.btn-icon` | 整页刷新 | `location.reload()` |
+| `⚙️` | `.btn-icon` | 设置入口占位 | 无 |
+| `👤` | `.avatar` | 用户占位 | 无 |
 
 ---
 
@@ -90,9 +98,9 @@
 | 元素 | 样式 | 作用 | 触发函数 |
 |---|---|---|---|
 | 标题 `🗺️ 板块热力图` | h2，色 `#fff` | 区块标识 | 无 |
-| `行业板块` Tab | `.tab-btn.active` — 青色高亮 | 切换到行业 ETF 视图 | `switchTab('sector')` |
-| `概念板块` Tab | `.tab-btn` — 灰色 | 切换到概念 ETF 视图 | `switchTab('concept')` |
-| 提示文字 | 字号 12px，色 `#78909c`，右对齐 | "矩形面积 ∝ 涨跌幅绝对值" | 无 |
+| `行业板块` Tab | `.tab-btn.active` — 青色高亮 | 切换到东方财富行业板块 | `switchTab('sector')` |
+| `概念板块` Tab | `.tab-btn` — 灰色 | 切换到东方财富概念板块 | `switchTab('concept')` |
+| 图例 | `.treemap-legend` | 大小=成交额，颜色=涨跌幅 | 无 |
 | Canvas | `id="treemap-canvas"`，900×500，响应式 | 绘制板块 Treemap 矩形 | `loadTreemap()` → `drawTreemap()` |
 | 加载遮罩 | `id="treemap-loading"`，绝对定位覆盖 Canvas | 加载中提示 | 显示/隐藏于 `loadTreemap()` |
 
@@ -137,10 +145,13 @@
 
 | 卡片 | 数据来源 | 条件样式 |
 |---|---|---|
-| 总成本 | `total_cost` | 无 |
+| 总资产 | `total_assets` | 无 |
+| 可用资金 | `available_funds` | 无 |
 | 总市值 | `total_market` | 无 |
-| 总盈亏 | `total_pnl` + `total_pnl_pct` | `.green`（正）`.red`（负） |
-| 持仓数 | `positions|length` | 无 |
+| 今日盈亏 | `total_pnl` + `total_pnl_pct` | `.up`（正）`.down`（负） |
+| 仓位占比 | `position_ratio`（`total_market / total_assets`） + `positions|length` | 无 |
+| 买入信号 | `buy_signals|length` | 无 |
+| 卖出提示 | `sell_signals|length` | `.red` |
 
 ---
 
@@ -167,8 +178,6 @@
 | `sell_signals` 非空 | 渲染信号卡片 |
 | `sell_signals` 为空 | 显示 `✅ 无（持仓健康）` |
 
-**JS 动态追加：** `appendSellSignal(sig)` 可在分析时动态插入新信号卡片，ID `sell-badge` 自动更新计数。
-
 ---
 
 ### 7. 买入信号区
@@ -194,8 +203,6 @@
 | `buy_signals` 非空 | 渲染信号卡片 |
 | `buy_signals` 为空 | 显示 `📭 今日无信号` |
 
-**JS 动态追加：** `appendBuySignal(sig)` 可在分析时动态插入，去重依据 `code|strategy` 组合键。
-
 ---
 
 ### 8. 持仓区
@@ -208,7 +215,9 @@
 | 元素 | 样式 | 作用 | 触发函数 |
 |---|---|---|---|
 | 标题 `📦 当前持仓` | h2 | 区块标识 | 无 |
-| `+ 添加` 按钮 | `.btn` | 展开买入表单 | `showAddForm()` |
+| `+ 添加` 按钮 | `.btn-sm.btn-add` | 展开买入表单 | `showAddForm()` |
+| `充值` 按钮 | `.btn-sm.btn-topup` | 打开充值弹窗 | `showTopupModal()` |
+| `提现` 按钮 | `.btn-sm.btn-withdraw` | 打开提现弹窗 | `showWithdrawModal()` |
 | 买入表单 | `.form`，默认 `display:none` | 输入 code/shares/price → POST `/position/add` | 提交走 form action |
 | 取消按钮 | `.btn` | 收起表单 | `hideAddForm()` |
 | 持仓表格 | 列：代码/名称/股数/成本/现价/市值/盈亏/操作 | 展示所有持仓 | 无 |
@@ -236,7 +245,16 @@
 
 ---
 
-### 10. 自选股区
+### 10. 充值 / 提现弹窗
+
+| 弹窗 | 容器 | 作用 | 触发函数 | API |
+|---|---|---|---|---|
+| 充值 | `#topup-modal` | 增加总资金和可用资金 | `showTopupModal()` / `doTopup()` | `POST /api/funds/add` |
+| 提现 | `#withdraw-modal` | 从可用资金提现，最多清零 | `showWithdrawModal()` / `doWithdraw()` | `POST /api/funds/withdraw` |
+
+---
+
+### 11. 自选股区
 
 | 属性 | 值 |
 |---|---|
@@ -246,28 +264,71 @@
 | 元素 | 样式 | 作用 | 触发函数 |
 |---|---|---|---|
 | 标题 `⭐ 自选股` | h2 + `.badge.green` 计数 | 区块标识 + 数量 | 无 |
-| 代码输入框 | `id="watchlist-input"`，等宽字体 | 输入 sh/sz+6位代码 | Enter 触发 `addToWatchlist()` |
-| `+ 添加` 按钮 | `.btn-primary.btn-sm` | 添加自选股（含行情拉取） | `addToWatchlist()` |
-| 状态提示 | `id="watchlist-add-status"`，默认隐藏 | 显示"查询中…"/"已添加"/错误 | 动态显示 |
-| 自选股表格 | 列：代码/名称/现价/涨幅/板块/操作/分析/删除 | 展示所有自选股 | 服务端 + JS `reloadWatchlist()` |
+| 自选股表格 | 列：代码/名称/现价/涨幅/板块/操作/删除/分析 | 展示所有自选股 | 服务端 + JS `reloadWatchlist()` |
+| 空状态 | `.empty-state` | 自选股为空时提示 | 无 |
 
 **每行按钮：**
 
 | 按钮 | 条件 | 样式 | 作用 | 触发函数 |
 |---|---|---|---|---|
-| `已持仓` | `is_held == true` | `.held-tag` 灰色标签 | 只读标识 | 无 |
-| `买入` | `is_held == false` | `.btn-primary.btn-sm` | 展开买入表单并预填 code + price | `showAddForCode(code, price)` |
-| `🔍` | 始终 | `.btn-sm` | 运行策略分析，结果追加到信号区 | `analyzeStock(code)` |
+| `买入` | 始终 | `.btn-primary.btn-sm` | 展开买入表单并预填 code + price | `showAddForCode(code, price)` |
 | `−` | 始终 | `.btn-del` 圆形红色按钮 22×22 | 从自选股删除 | `removeFromWatchlist(code)` |
+| `分析` | 始终 | `.btn-sm.btn-view` | 打开策略评分弹窗 | `showWatchlistAnalysis(code)` |
 
 ---
 
-### 11. 交易历史
+### 12. 自选股分析弹窗
 
 | 属性 | 值 |
 |---|---|
-| 容器 | `<div class="box">` |
+| 容器 | `<div id="analysis-modal" class="modal">` |
+| 触发 | 自选股行最右侧点击"分析"按钮 |
+| 数据来源 | `GET /api/watchlist/analyze/<code>` |
+
+| 元素 | 样式 | 作用 | 触发函数 |
+|---|---|---|---|
+| 标题 | `#analysis-modal-title` | 显示股票名称/代码 | `showWatchlistAnalysis(code)` 动态设置 |
+| 股票信息 | `.modal-subtitle` | 显示 code、板块、现价 | 同上 |
+| 分析表格 | `.analysis-table` | 按策略展示大类、评分、触发状态、说明 | 同上 |
+| 触发标签 | `.analysis-hit` / `.analysis-miss` | 标识策略是否触发买入条件 | 同上 |
+| 关闭按钮 | `.btn` | 关闭弹窗 | `closeAnalysisModal()` |
+
+---
+
+### 13. 策略状态
+
+| 属性 | 值 |
+|---|---|
+| 容器 | `<div class="box" id="strategy-status-box">` |
+| 数据来源 | `GET /api/strategy_status` |
+| 刷新 | 页面加载时调用 `reloadStrategyStatus()` |
+
+| 列 | 内容 |
+|---|---|
+| 策略名称 | `s.name` |
+| 状态 | `.strat-status.run/stop` |
+| 今日信号 | `s.signals_today` |
+| 最后运行 | `s.last_run` |
+
+---
+
+### 14. 系统日志
+
+| 属性 | 值 |
+|---|---|
+| 容器 | `<div class="box" id="system-log-box">` |
+| 数据来源 | `GET /api/system_log` |
+| 刷新 | 页面加载 + 每 10 秒 `reloadSystemLog()` |
+
+---
+
+### 15. 交易历史
+
+| 属性 | 值 |
+|---|---|
+| 容器 | `<div class="box collapsible" id="trades-box">` |
 | 条件 | 仅 `trades` 非空时渲染 |
+| 展开/收起 | 点击标题触发 `toggleTrades()` |
 
 | 列 | 内容 | 说明 |
 |---|---|---|
@@ -279,7 +340,7 @@
 | 股数 | `t.shares` | 交易数量 |
 | 价格 | ¥xx.xx | 成交价 |
 | 备注 | `t.note` | 盈亏或手动备注 |
-| `删` 按钮 | `.btn-sell` | `confirm()` 后 POST `/trade/delete/<id>` → `deleteTrade(id)` |
+| 状态 | `已成交` | 只读显示 |
 
 ---
 
@@ -325,19 +386,18 @@
 ### 自选股 添加 / 删除
 
 ```
- [输入代码 + Enter 或 点击"+ 添加"]
+ [成分股弹窗点击 + 按钮]
     │
     ▼
- addToWatchlist()
+ toggleWatchlist(code, btn)
     │
-    ├─ POST /api/watchlist/add_with_info {code}
-    ├─ 后端拉行情 → upsert_stock → 加入 watchlist.json
+    ├─ POST /api/watchlist/toggle {code}
     ├─ watchlistCodes.add(code)
     │
     ▼
  reloadWatchlist()
     │
-    └─ 表格刷新，新行出现（含 − 删除按钮）
+    └─ 表格刷新，新行出现（含 买入 / − / 分析 按钮）
 
 
  [点击自选股行末 − 按钮]
@@ -352,9 +412,20 @@
  reloadWatchlist()
     │
     └─ 表格刷新，该行消失
+
+
+[点击自选股行末"分析"按钮]
+   │
+   ▼
+showWatchlistAnalysis(code)
+   │
+   ├─ fetch /api/watchlist/analyze/<code>
+   ├─ 按策略渲染评分与触发状态
+   │
+   └─ 弹出 #analysis-modal
 ```
 
-### 持仓 买入 / 卖出
+### 持仓 买入 / 卖出 + 资金同步
 
 ```
  [点击"+ 添加" 或 自选股"买入"]
@@ -369,7 +440,9 @@
  [提交表单]
     │
     ├─ POST /position/add
-    ├─ 后端 pf.add_position + pf.add_trade
+    ├─ 后端校验 available_funds
+    ├─ pf.add_position + pf.add_trade
+    ├─ funds.deduct_on_buy
     ├─ redirect → GET /
     │
     └─ 持仓表刷新，新行出现
@@ -388,37 +461,26 @@
  [提交表单]
     │
     ├─ POST /position/sell/<code>
-    ├─ 后端 pf.sell_position + pf.add_trade
+    ├─ pf.sell_position + pf.add_trade
+    ├─ funds.add_on_sell
     ├─ redirect → GET /
     │
     └─ 持仓表刷新
 ```
 
-### 策略分析（自选股 🔍）
+### 充值 / 提现
 
 ```
- [点击自选股行 🔍 按钮]
-    │
-    ▼
- analyzeStock(code)
-    │
-    ├─ POST /api/watchlist/analyze/<code>
-    ├─ 后端 strategy.scan_stock() + strategy.sell_signal()
-    │
-    ▼
- [返回结果]
-    │
-    ├─ 买入信号 → appendBuySignal(sig)
-    │   └─ 去重（renderedBuyKeys）
-    │   └─ 插入 #buy-signals-list
-    │   └─ 更新 #buy-badge 计数
-    │
-    ├─ 卖出信号 → appendSellSignal(sig)
-    │   └─ 去重（renderedSellCodes）
-    │   └─ 插入 #sell-signals-list
-    │   └─ 更新 #sell-badge 计数
-    │
-    └─ 该行短暂高亮（绿色背景 800ms）
+[点击 充值 / 提现]
+   │
+   ▼
+showTopupModal() / showWithdrawModal()
+   │
+   ▼
+doTopup() / doWithdraw()
+   │
+   ├─ POST /api/funds/add 或 /api/funds/withdraw
+   └─ 成功后刷新页面
 ```
 
 ### Tab 切换（行业 ↔ 概念）
@@ -448,6 +510,10 @@
 | 函数 | 触发方式 | 作用 | 调用的 API |
 |---|---|---|---|
 | `location.reload()` | Navbar 刷新按钮 | 整页重载 | GET / |
+| `refreshLastRefresh()` | 页面加载 + interval | 刷新顶部时间 | 无 |
+| `reloadMarketStatus()` | 页面加载 | 拉取市场状态 | `/api/market_status` |
+| `reloadStrategyStatus()` | 页面加载 | 拉取策略状态 | `/api/strategy_status` |
+| `reloadSystemLog()` | 页面加载 + 10s interval | 拉取系统日志 | `/api/system_log` |
 | `switchTab(type)` | Tab 按钮点击 | 切换行业/概念 | `/api/boards?type=` |
 | `loadTreemap(type)` | `switchTab()` / 页面加载 | 拉取板块数据并绘 Canvas | `/api/boards?type=` |
 | `drawTreemap(items)` | `loadTreemap()` | Canvas 绘制 Treemap 矩形 | 无（纯渲染） |
@@ -455,11 +521,13 @@
 | `closeStockModal()` | 弹窗关闭按钮 | 关闭成分股弹窗 | 无 |
 | `toggleWatchlist(code, btn)` | 成分股弹窗 +/- 按钮 | 加入/移出自选，切换按钮样式 | `/api/watchlist/toggle` |
 | `reloadWatchlist()` | 多处触发 | 刷新自选股表格 | `/api/watchlist/stocks` |
-| `addToWatchlist()` | 输入框 Enter / "+ 添加" | 添加自选股（含行情） | `/api/watchlist/add_with_info` |
 | `removeFromWatchlist(code)` | 自选股行 − 按钮 | 移出自选股 | `/api/watchlist/toggle` |
-| `analyzeStock(code)` | 自选股行 🔍 按钮 | 运行策略分析，追加信号 | `/api/watchlist/analyze/<code>` |
-| `appendBuySignal(sig)` | `analyzeStock()` | 动态插入买入信号卡片 | 无 |
-| `appendSellSignal(sig)` | `analyzeStock()` | 动态插入卖出信号卡片 | 无 |
+| `escapeHtml(value)` | JS 动态渲染文本前调用 | 转义弹窗表格中的策略说明 | 无 |
+| `showWatchlistAnalysis(code)` | 自选股行"分析" | 打开策略评分弹窗 | `/api/watchlist/analyze/<code>` |
+| `closeAnalysisModal()` | 策略分析弹窗"关闭" | 关闭策略分析弹窗 | 无 |
+| `toggleTrades()` | 交易历史标题点击 | 展开/收起交易历史 | 无 |
+| `onCategoryChange()` | 大类筛选变化 | 重建策略筛选下拉 | 无 |
+| `applyFilter()` | 策略筛选变化 | 过滤买入信号列表 | 无 |
 | `showAddForm()` | 持仓区"+ 添加" | 展开买入表单 | 无 |
 | `hideAddForm()` | 买入表单"取消" | 收起买入表单 | 无 |
 | `showAddForCode(code, price)` | 自选股行"买入" | 展开买入表单并预填 | 无 |
@@ -467,6 +535,10 @@
 | `closeSell()` | 卖出弹窗"取消" | 关闭卖出弹窗 | 无 |
 | `updatePreview()` | 卖出弹窗输入变化 | 实时计算卖出金额预览 | 无 |
 | `deleteTrade(id)` | 交易历史行"删" | 确认后删除交易 | `/trade/delete/<id>` |
+| `showTopupModal()` / `closeTopup()` | 充值按钮/取消 | 显示或关闭充值弹窗 | 无 |
+| `doTopup()` | 充值确认 | 调用充值 API | `/api/funds/add` |
+| `showWithdrawModal()` / `closeWithdraw()` | 提现按钮/取消 | 显示或关闭提现弹窗 | 无 |
+| `doWithdraw()` | 提现确认 | 调用提现 API | `/api/funds/withdraw` |
 
 ---
 
@@ -477,6 +549,7 @@
 | `.navbar` | 顶部导航栏 | flex，半透明黑底 |
 | `.container` | 内容区 | max-width 1200px，居中 |
 | `.cards` | 顶部四卡片容器 | grid auto-fit |
+| `.cards-7` | 顶部七卡片布局 | grid 7 列 |
 | `.card` | 单张卡片 | 圆角 8px，半透明背景 |
 | `.card.green` / `.card.red` | 盈亏卡片 | 绿/红边框 |
 | `.row` | 左右并排容器 | grid 1fr 1fr |
@@ -489,8 +562,16 @@
 | `.tab-btn` / `.tab-btn.active` | Tab 切换按钮 | 灰色 → 青色高亮 |
 | `.btn-del` | 自选股删除按钮 | 圆形 22×22，红色 − |
 | `.btn-wl-add` / `.btn-wl-remove` | 成分股弹窗 +/- | 圆形 24×24 |
+| `.btn-topup` / `.btn-withdraw` | 充值/提现按钮 | 黄/红色按钮 |
 | `.modal` | 弹窗遮罩 | fixed 全屏，半透明黑 |
 | `.modal-content` | 弹窗内容 | 深色卡片 |
+| `.modal-subtitle` | 弹窗副标题 | 灰色小字 |
+| `.analysis-modal-content` | 自选股策略分析弹窗 | 宽屏弹窗 |
+| `.analysis-table` | 策略分析结果表 | 第 5 列加宽 |
+| `.analysis-desc` | 策略描述 | 灰色小字 |
+| `.analysis-hit` / `.analysis-miss` | 分析结果状态 | 触发/未触发标签 |
 | `.form` | 表单容器 | flex，gap 8px |
 | `.held-tag` | 已持仓标签 | 灰色圆角标签 |
 | `.flash-success` / `.flash-error` | 消息条 | 绿/红半透明底 |
+| `.strat-status.run` / `.strat-status.stop` | 策略状态 | 运行/停机颜色 |
+| `.log-table` / `.lvl-*` | 系统日志 | 小字 + 级别标签 |
