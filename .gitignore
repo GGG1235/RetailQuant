@@ -22,3 +22,5 @@ data/trades.json
 data/funds.json
 data/users.json
 data/parquet/
+
+uv.lock
