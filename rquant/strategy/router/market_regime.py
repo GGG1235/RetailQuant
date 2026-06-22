@@ -63,6 +63,9 @@ class MarketRegime:
     BEAR: Regime = "BEAR"
     STRONG_BEAR: Regime = "STRONG_BEAR"
 
+    # 常量
+    MIN_KLINE_DAYS = 120  # 最大窗口 MA120 所需最少 K 线条数
+
     # 阈值
     STRONG_BULL_MA_RATIO = 1.02  # MA60 / MA120
     STRONG_BULL_CLOSE_RATIO = 1.05  # close / MA120
@@ -76,7 +79,7 @@ class MarketRegime:
 
         严格时序：所有指标只用 ≤ 最后一天的数据
         """
-        if df is None or len(df) < 130:
+        if len(df) < self.MIN_KLINE_DAYS:
             return MarketState(
                 regime=self.SIDEWAYS,
                 close=0.0,
@@ -161,12 +164,13 @@ def get_market_regime(
         return _REGIME_CACHE[today]
 
     # 缓存 miss —— 拉指数 K 线
-    try:
-        from rquant.business.data import fetch_kline  # 延迟导入避免循环
+    from rquant.business.data import fetch_kline  # 延迟导入避免循环
+    from config import config
 
-        df = fetch_kline("sh000001", 130)
-    except Exception:
-        df = None
+    df = fetch_kline(
+        config.business.default_index_code,
+        MarketRegime.MIN_KLINE_DAYS,
+    )
 
     state = MarketRegime().detect(df)
     if use_cache:
