@@ -147,7 +147,9 @@ def get_market_regime(
         cache_key = today
         if not index_df.empty and "date" in index_df.columns:
             try:
-                cache_key = str(index_df["date"].iloc[-1])
+                raw = index_df["date"].iloc[-1]
+                # 归一化到 'YYYY-MM-DD'：str 和 Timestamp 输入都给一致的 key
+                cache_key = pd.Timestamp(raw).strftime("%Y-%m-%d")
             except Exception:
                 cache_key = today
         state = MarketRegime().detect(index_df)
