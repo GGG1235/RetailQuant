@@ -129,8 +129,7 @@ class Config:
         """重新加载配置（从 config.toml 读取，校验必需项，最后应用环境变量）"""
         if not self._config_path.exists():
             raise FileNotFoundError(
-                f"配置文件不存在: {self._config_path}\n"
-                f"请在项目根目录创建 config.toml（可参考 config.toml 示例）"
+                f"配置文件不存在: {self._config_path}\n请在项目根目录创建 config.toml（可参考 config.toml 示例）"
             )
 
         raw_text = self._config_path.read_text(encoding="utf-8")
@@ -169,9 +168,7 @@ class Config:
                 if key not in data:
                     missing.append(full_key)
                 else:
-                    missing.extend(
-                        Config._validate(sub_schema, data[key], full_key)
-                    )
+                    missing.extend(Config._validate(sub_schema, data[key], full_key))
         return missing
 
     def _apply_env_overrides(self) -> None:
