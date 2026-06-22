@@ -7,6 +7,7 @@ rquant.web.routes — Flask 路由
 from __future__ import annotations
 from datetime import datetime
 
+import pandas as pd
 from flask import (
     Flask,
     flash,
@@ -40,13 +41,25 @@ def register_routes(app: Flask) -> None:
     def index():
         _log("首页被访问 —— 如果你看到这行，说明浏览器确实连接到了服务器")
         positions_raw = pf.get_positions()
+        pool_rows = data.get_pool()
+
+        # 0. 一次性预加载所有需要的 K 线（持仓 + 标的池，去重）
+        # 避免 sell_signals / buy_signals / positions 三处各自 fetch 同一只股票
+        codes_needed: set[str] = {p["code"] for p in positions_raw} | {s["code"] for s in pool_rows}
+        klines: dict[str, "pd.DataFrame"] = {}
+        for code in codes_needed:
+            try:
+                klines[code] = data.fetch_kline(code, 70)
+            except Exception as e:
+                _log(f"K 线拉取失败 {code}: {e}")
+                klines[code] = pd.DataFrame()  # type: ignore[name-defined]
 
         # 1. 持仓（市值 / 盈亏）
         positions = []
         total_cost = 0.0
         total_market = 0.0
         for p in positions_raw:
-            df = data.fetch_kline(str(p["code"]), 70)
+            df = klines.get(str(p["code"]), pd.DataFrame())
             current = float(df["close"].iloc[-1]) if not df.empty else p["avg_cost"]
             market_value = current * p["shares"]
             pnl = market_value - p["avg_cost"] * p["shares"]
@@ -76,7 +89,7 @@ def register_routes(app: Flask) -> None:
         # 2. 卖出信号
         sell_signals = []
         for p in positions:
-            df = data.fetch_kline(str(p["code"]), 70)
+            df = klines.get(str(p["code"]), pd.DataFrame())
             sig = scan_sell(p, df)
             if sig:
                 sell_signals.append(
@@ -96,8 +109,9 @@ def register_routes(app: Flask) -> None:
         from collections import Counter
 
         per_strategy_hits: Counter = Counter()
-        for s in data.get_pool():
-            df = data.fetch_kline(str(s["code"]), 70)
+
+        for s in pool_rows:
+            df = klines.get(str(s["code"]), pd.DataFrame())
             for sig in scan_stock(s["code"], s["name"], s["sector"], df):
                 buy_signals.append(
                     {

@@ -3,6 +3,8 @@
 A 股个人量化看板（单实例、本地优先、零外部账号）—— Flask + 缠论近似 + 板块 Treemap + 自选股 + 数据源池。
 
 > 📖 **9 个策略的详细说明**（触发条件、信心度算法、参数、适用场景）见 [`STRATEGIES.md`](STRATEGIES.md)。本文档专注架构、启动、修改记录。
+>
+> 📝 **最近变更**：2026-06-22 修了 3 处 P0（首页 K 线 N+1 / 路由器缓存污染回测 / 月频 look-ahead），详见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 - ✅ **策略引擎**（7 大类 / 10 个策略：缠论 / 量价突破 / 海龟 / 多因子 / ETF 轮动 / 网格 / 游资 / 场景路由器）
 - ✅ 止损 / 止盈信号（-7% / +15% / 跌破 MA60）
@@ -407,6 +409,7 @@ rQuant/
 ├── app.py                 # 启动入口（转发到 rquant.web）
 ├── strategy.py            # 兼容层（老 API 转发到 rquant.compat）
 ├── STRATEGIES.md          # 10 个策略详细文档
+├── CHANGELOG.md           # 变更日志（最新修复见 2026-06-22）
 ├── README.md
 ├── pyproject.toml / requirements.txt / LICENSE
 │

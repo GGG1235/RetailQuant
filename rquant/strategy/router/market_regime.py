@@ -127,21 +127,35 @@ class MarketRegime:
 _REGIME_CACHE: dict[str, MarketState] = {}
 
 
-def get_market_regime(index_df: pd.DataFrame | None = None) -> MarketState:
+def get_market_regime(
+    index_df: pd.DataFrame | None = None,
+    use_cache: bool = True,
+) -> MarketState:
     """获取市场状态（按日缓存）
 
-    传 index_df 时强制重算（用于测试）
-    不传时优先用缓存，缓存 miss 时拉 sh000001 的 K 线算一次
+    参数:
+        index_df:  指数 K 线（DataFrame with 'date'/'close' cols）。
+                   传入则按其最后日期计算；不传则拉 sh000001。
+        use_cache: 是否读写缓存。
+                   - True（默认）: 实盘场景，按"今天"缓存。
+                   - False: 回测场景，不污染全局缓存（缓存命中会按调用顺序污染"今天"）。
     """
     today = datetime.now().strftime("%Y-%m-%d")
 
     if index_df is not None:
-        # 强制重算
+        # 强制重算：用传入 K 线的最后日期作 cache key，避免污染"今天"
+        cache_key = today
+        if not index_df.empty and "date" in index_df.columns:
+            try:
+                cache_key = str(index_df["date"].iloc[-1])
+            except Exception:
+                cache_key = today
         state = MarketRegime().detect(index_df)
-        _REGIME_CACHE[today] = state
+        if use_cache:
+            _REGIME_CACHE[cache_key] = state
         return state
 
-    if today in _REGIME_CACHE:
+    if use_cache and today in _REGIME_CACHE:
         return _REGIME_CACHE[today]
 
     # 缓存 miss —— 拉指数 K 线
@@ -152,11 +166,10 @@ def get_market_regime(index_df: pd.DataFrame | None = None) -> MarketState:
     except Exception:
         df = None
 
-    if df is None:
-        state = MarketRegime().detect(pd.DataFrame())
-    else:
-        state = MarketRegime().detect(df)
-    _REGIME_CACHE[today] = state
+    state = MarketRegime().detect(df)
+    if use_cache:
+        _REGIME_CACHE[today] = state
+
     return state
 
 

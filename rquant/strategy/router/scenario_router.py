@@ -36,7 +36,7 @@ import pandas as pd
 
 from ..base import Signal
 from ..registry import register
-from .market_regime import MarketRegime, get_market_regime
+from .market_regime import MarketRegime, MarketState, get_market_regime
 
 
 # 状态 → 子策略类别映射
@@ -61,18 +61,45 @@ class ScenarioRouter:
         return ROUTING_TABLE.get(regime, [])
 
     def signal_buy(self, code: str, name: str, sector: str, df: pd.DataFrame) -> Signal | None:
+        """实盘入口：自动用缓存的市场状态"""
         if df is None or df.empty:
             return None
-
-        # 1. 算大盘状态（按日缓存）
         state = get_market_regime()
+        return self._signal_buy_with_regime(code, name, sector, df, state)
 
-        # 2. 取该状态下的子策略类别
+    def signal_buy_at(
+        self,
+        code: str,
+        name: str,
+        sector: str,
+        df: pd.DataFrame,
+        regime_state: MarketState,
+    ) -> Signal | None:
+        """回测入口：调用方传入已算好的 regime（避免污染全局缓存）
+
+        回测场景下，调用方应：
+          1) 按 dt 切片指数 K 线：index_df_until_dt = index_df[index_df.date <= dt]
+          2) 调用 get_market_regime(index_df=..., use_cache=False) 算当日的 regime
+          3) 传入本方法
+        """
+        if df is None or df.empty:
+            return None
+        return self._signal_buy_with_regime(code, name, sector, df, regime_state)
+
+    def _signal_buy_with_regime(
+        self,
+        code: str,
+        name: str,
+        sector: str,
+        df: pd.DataFrame,
+        state: MarketState,
+    ) -> Signal | None:
+        # 取该状态下的子策略类别
         sub_cats = self._pick_subcategories(state.regime)
         if not sub_cats:
             return None
 
-        # 3. 跑这些子策略（按多个类别聚合）
+        # 跑这些子策略（按多个类别聚合）
         from .scenario_router import by_category_categories
 
         sigs: list[Signal] = []
@@ -88,9 +115,9 @@ class ScenarioRouter:
         if not sigs:
             return None
 
-        # 4. 取 confidence 最高的（如果多个子策略同时命中，路由器给出最强信号）
+        # 取 confidence 最高的（如果多个子策略同时命中，路由器给出最强信号）
         best = max(sigs, key=lambda s: s.confidence)
-        # 5. 在 extra 里附上市场状态信息
+        # 在 extra 里附上市场状态信息
         best.extra["router_regime"] = state.regime
         best.extra["router_regime_desc"] = state.description
         best.extra["router_sub_cats"] = sub_cats

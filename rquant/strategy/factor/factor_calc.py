@@ -183,9 +183,15 @@ def run_pipeline(
     fetched = 0
     for code in all_codes:
         df = fetch_kline(code, kline_days)
-        if not df.empty:
-            kline_map[code] = df
-            fetched += 1
+        if df.empty:
+            continue
+        # ★ 严格时序：只用 ≤ rebalance_date 的数据，防止 look-ahead bias
+        # 例如调仓日是 2025-06-01，不能用到 2025-06-02 之后的收盘价算动量
+        df = df[df["date"] <= rebalance_date].reset_index(drop=True)
+        if df.empty:
+            continue
+        kline_map[code] = df
+        fetched += 1
     print(f"[factor_calc] K 线获取: {fetched}/{len(all_codes)}")
 
     # 3) 硬过滤

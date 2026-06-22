@@ -731,7 +731,9 @@ STOP_LOSS = -0.10
 
 **严格时序**：所有指标只看 ≤ 当日 K 线。
 
-**按日缓存**：`get_market_regime()` 每天只算一次，避免每只股票重复调。
+**缓存策略**：`get_market_regime()` 按"调用日的日期"缓存（实盘路径）；传入 `index_df` 时按"数据最后日期"缓存，避免污染实盘缓存。回测场景必须传 `use_cache=False`。
+
+> **2026-06-22 修复**：之前的实现按"今天日期"缓存，**回测时整次只用一个 regime 状态**——这是真实的回测错误。已修，详见 `CHANGELOG.md`。
 
 #### 状态 → 子策略映射
 
@@ -747,7 +749,7 @@ STOP_LOSS = -0.10
 
 ```python
 # 1. 算大盘状态
-state = get_market_regime()  # 按日缓存
+state = get_market_regime()  # 实盘路径，按调用日缓存
 
 # 2. 取该状态下的子策略类别
 sub_cats = ROUTING_TABLE[state.regime]
@@ -780,20 +782,31 @@ best.extra["router_sub_cats"] = sub_cats
 #### 调用方式
 
 ```python
-# 方式 1: 用路由器
+# 方式 1: 用路由器（实盘）
 from strategies import get
 router = get("ScenarioRouter")
 sig = router.signal_buy(code, name, sector, df)
 
-# 方式 2: 直接看市场状态
+# 方式 2: 直接看市场状态（实盘，按今天日期缓存）
 from strategies.router import get_market_regime
 state = get_market_regime()
 print(state.regime, state.description)
 
-# 方式 3: 测试时强制重算
+# 方式 3: 测试 / 回测时强制重算（不污染实盘缓存）
 from strategies.router import get_market_regime, clear_regime_cache
 clear_regime_cache()
-state = get_market_regime(my_index_df)
+state = get_market_regime(my_index_df, use_cache=False)
+# 缓存 key 现在按 index_df 的最后日期，回测时不同 dt 互不污染
+
+# 方式 4: 回测场景用 router 的 signal_buy_at（2026-06-22 新增）
+from rquant.strategy.router import get_market_regime, ScenarioRouter
+
+# 每个调仓日循环：
+index_df_until_dt = index_df[index_df["date"] <= dt]
+regime_state = get_market_regime(index_df=index_df_until_dt, use_cache=False)
+
+router = ScenarioRouter()
+sig = router.signal_buy_at(code, name, sector, df, regime_state)
 ```
 
 ---
