@@ -1,30 +1,41 @@
-# strategy.py 设计详解
+# rquant/strategy/ 设计详解
 
-> 面向 AI 维护者 | 2026-06-17 | 配合 `大纲.md` 使用
+> 面向 AI 维护者 | 2026-06-23 | 配合 `docs/大纲.md` 使用
 
 ---
 
 ## 1. 模块定位
 
-`strategy.py` 是 RetailQuant 的**核心逻辑层**——项目和其他看股票软件的唯一区别。它不碰 HTTP、不碰文件、不碰数据库。唯一外部依赖是 `pandas`（OHLC DataFrame）。
+`rquant/strategy/` 是 RetailQuant 的**核心逻辑层**——项目和其他看股票软件的唯一区别。它不碰 HTTP、不碰文件、不碰数据库。唯一外部依赖是 `pandas`（OHLC DataFrame）。
 
-**职责边界：** 输入 K 线 → 输出信号。不管理仓位、不管理资金、不判断市场状态。
+**职责边界：** 输入 K 线 → 输出信号。不管理仓位、不管理资金、不判断市场状态（市场状态由 router 子模块独立负责）。
+
+**架构：** Protocol + 装饰器注册模式。`Strategy` 协议定义接口，`@register` 自动发现策略，`scan_*` 函数统一入口。
 
 ---
 
 ## 2. 公开接口总览
 
+### 入口函数
+
 | 函数 | 输入 | 输出 | 调用方 |
 |------|------|------|--------|
-| `chanlun2b_signal(code, name, sector, df)` | K线 DataFrame | `Signal \| None` | `scan_stock()` |
-| `buyhold_signal(code, name, sector, df)` | K线 DataFrame | `Signal \| None` | `scan_stock()` |
-| `scan_stock(code, name, sector, df)` | K线 DataFrame | `list[Signal]` | `app.py:index()` |
-| `sell_signal(position, df)` | 持仓 dict + K线 | `dict \| None` | `app.py:index()` |
+| `scan_stock(code, name, sector, df)` | K线 DataFrame | `list[Signal]` | `routes.py:index()` |
+| `scan_category(category, code, name, sector, df)` | K线 DataFrame + 大类名 | `list[Signal]` | ScenarioRouter |
+| `scan_sell(position, df)` | 持仓 dict + K线 | `dict \| None` | `routes.py:index()` |
+| `all_strategies()` | — | `list[Strategy]` | 查询/调试 |
+| `by_category(category)` | 大类名 | `list[Strategy]` | ScenarioRouter |
+| `get(name)` | 策略名 | `Strategy \| None` | 单策略调用 |
 
-**约定：**
-- `df` 必须有列 `close`（小写），至少 N 根 K 线。数据不足 → 返回 `None`。
-- 所有价格单位：人民币元。
-- `code` 格式：`sh600519`（小写）。
+### 通用指标（`base.py`）
+
+```python
+ma(df, n)           # N 日 MA              prev_ma(df, n)      # 昨日 N 日 MA
+highest(df, n)      # N 日最高             lowest(df, n)       # N 日最低
+atr(df, n=14)       # ATR                  rsi(df, n=14)       # RSI
+vol_ratio(df, n=5)  # 量比                 momentum(df, n=20)  # N 日动量
+change_pct(df)      # 当日涨跌幅
+```
 
 ---
 
@@ -33,229 +44,226 @@
 ```python
 @dataclass
 class Signal:
-    code: str           # 股票代码
-    name: str           # 股票名称
-    sector: str         # 所属板块（如 "半导体"）
-    strategy: str       # 策略名 "ChanLun2B" | "BuyHold"
-    current_price: float       # 最新收盘价
-    suggested_buy: float       # 建议买入价（含 0.5% 安全垫）
-    stop_loss: float           # 止损价
-    take_profit: float         # 止盈价
-    reason: str                # 触发原因（人类可读）
-    confidence: float          # 置信度 0-100
-    market_state: str = "SIDEWAYS"  # 预留字段，当前未使用
+    code: str                    # 股票代码
+    name: str                    # 股票名称
+    sector: str                  # 所属板块
+    strategy: str                # 策略 ID（如 "DonchianTurtle"）
+    category: str                # 大类（如 "turtle"）
+    current_price: float         # 最新收盘价
+    suggested_buy: float         # 建议买入价（+0.5% 容忍滑点）
+    stop_loss: float             # 止损价
+    take_profit: float           # 止盈价
+    reason: str                  # 触发原因（人类可读）
+    confidence: float            # 置信度 0-100
+    market_state: str = "SIDEWAYS"
+    extra: dict[str, Any] = field(default_factory=dict)  # 策略特有字段（原始指标、参数等）
 ```
 
 **字段语义：**
-- `suggested_buy` = `current_price × 1.005`，即比现价高 0.5%。设计意图：允许小幅追高，不要求精确抄底。
-- `stop_loss` / `take_profit` 的计算基数不同：缠论以 `suggested_buy` 为基，BuyHold 以 `current_price` 为基。因为前者是追涨信号买入价更可能成交在 suggested_buy，后者是低吸信号可能在 current_price 附近成交。
-- `confidence` 不是概率，是设计者的主观权重。用于前端排序或过滤（当前未用）。
-- `market_state` 目前固定 `"SIDEWAYS"`，是为未来市场环境判断预留的槽位。
+- `suggested_buy` = `current_price × 1.005`，即比现价高 0.5%。允许小幅追高，不要求精确抄底。
+- `stop_loss` / `take_profit` 的基数由各策略自行决定（一般为 `suggested_buy`）。
+- `confidence` 是策略内置信度评分，范围 0-100，前端按此降序排列信号。
+- `extra` 字典可存放策略专有数据，如 `router_regime`、`martingale_action`、因子的原始值等。
 
 ---
 
-## 4. 策略一：缠论 2B 近似（chanlun2b_signal）
-
-### 4.1 策略逻辑
-
-缠论原版的"第二类买点"（2B）定义：下跌趋势结束后的第一次回调不破前低。当前实现是**最简近似**——只用均线关系拟合，不做分型/笔/线段。
-
-**触发条件（三个同时满足）：**
-
-```
-① close > MA5        （收盘价站在 5 日均线上方）
-② MA5 > MA20         （短期均线在中期均线上方——多头排列确认）
-③ prev_close < prev_MA5  （昨日收盘在昨日 MA5 下方——确认今日是「上穿」日）
-```
-
-条件③是关键：防止连续多日站上 MA5 后的重复信号。只取"刚站上"的那一天。
-
-### 4.2 参数
-
-| 参数 | 值 | 原理 |
-|------|----|------|
-| 最短数据要求 | 25 根 K 线 | MA20 至少需要 20 根 + 前日 MA5 需要 5 根缓冲 |
-| MA 窗口 | 5 / 20 | 缠论常用周期（1周 / 1月） |
-| 建议买入价 | `close × 1.005` | +0.5% 安全垫 |
-| 止损 | `suggested_buy × 0.93` | -7%，基于买入价 |
-| 止盈 | `suggested_buy × 1.15` | +15%，基于买入价 |
-| 置信度 | 80 | 主观：均线上穿是较强的趋势确认信号 |
-
-### 4.3 边界情况
-
-- `df` 为 `None` 或长度 < 25 → 返回 `None`
-- 满足条件但 MA5 和 MA20 几乎相等 → 仍然触发（不做差值阈值过滤）
-- 多日连续满足时只第一天触发（条件③自动过滤后续日）
-
----
-
-## 5. 策略二：Buy & Hold 低吸（buyhold_signal）
-
-### 5.1 策略逻辑
-
-最简化的长线持有策略。不判断趋势方向，只做一件事：**价格比长期均线便宜时提醒买入**。
-
-**触发条件：**
-
-```
-close < MA60 × 0.95
-```
-
-即现价低于 60 日均线的 95%。相当于"打折 5% 以上"的低位区域。
-
-### 5.2 参数
-
-| 参数 | 值 | 原理 |
-|------|----|------|
-| 最短数据要求 | 60 根 K 线 | MA60 恰好需要 60 根 |
-| MA 窗口 | 60 | 季度线（约 3 个月） |
-| 触发折扣 | 0.95 | 低于均线 5% 才触发，避免轻微波动频繁信号 |
-| 建议买入价 | `close × 1.005` | +0.5% 安全垫 |
-| 止损 | `close × 0.90` | -10%，基于现价 |
-| 止盈 | `close × 1.20` | +20%，基于现价 |
-| 置信度 | 60 | 主观：纯估值信号，无趋势确认，可靠性低于缠论 |
-
-### 5.3 设计意图
-
-BuyHold 和缠论 2B 是互补关系：
-- 缠论抓**趋势启动**（追涨）
-- BuyHold 抓**超跌区域**（低吸）
-
-两者独立判断，不做互斥——同一只股票可能同时触发两个信号。
-
----
-
-## 6. 信号汇聚：scan_stock()
+## 4. Strategy 协议
 
 ```python
-def scan_stock(code, name, sector, df) -> list[Signal]:
-    # 对单只股票跑所有买入策略，收集全部命中的 Signal
+class Strategy(Protocol):
+    name: str           # 唯一 ID（如 "DonchianTurtle"）
+    category: str       # 大类（如 "turtle"）
+    description: str    # 一句话说明
+
+    def signal_buy(self, code: str, name: str, sector: str,
+                   df: pd.DataFrame) -> Signal | None: ...
+    def signal_sell(self, position: dict[str, Any],
+                    df: pd.DataFrame) -> dict[str, Any] | None: ...
 ```
 
-**设计意图：** 扩展新策略时只需要在这里加一行调用，不需要改 `app.py`。
-
-当前逻辑：依次调 `chanlun2b_signal` 和 `buyhold_signal`，收集非 `None` 的结果。两个策略都对同一根 DataFrame 做判断，并行不互斥。
-
-**调用链：** `app.py:index()` → `data.get_pool()` 遍历 → 每只股票 `data.fetch_kline()` → `strategy.scan_stock()` → 前端渲染买入信号列表。
+所有策略必须实现 `signal_buy` 和 `signal_sell`。`df` 列名固定为 `date, open, high, low, close, volume`（全小写）。数据不足或条件不满足 → 返回 `None`。
 
 ---
 
-## 7. 卖出信号：sell_signal()
-
-### 7.1 不同于买入信号
-
-`sell_signal` 的输入和输出类型与买入函数不同：
-- **输入：** `position` 是持仓字典（需要 `avg_cost` 计算盈亏百分比），而不只是 code/name/sector
-- **输出：** 普通 dict（不需要 `Signal` 的 `sector`/`strategy`/`confidence` 等字段），含 `urgency`
-
-### 7.2 三条卖出规则（按优先级）
-
-| 优先级 | 条件 | 建议卖出价 | urgency | 原理 |
-|--------|------|-----------|---------|------|
-| 1 | `pnl_pct ≤ -7%` | `close × 0.99` | `"urgent"` | 硬止损，保命 |
-| 2 | `pnl_pct ≥ +15%` | `close × 0.995` | `"normal"` | 硬止盈，落袋 |
-| 3 | `close < MA60 × 0.95` | `close × 0.99` | `"normal"` | 跌破均线，趋势转弱 |
-
-**短路逻辑：** 先判断止损 → 再判断止盈 → 再判断跌破均线。命中第一条立即返回，不检查后续。
-
-### 7.3 返回结构
+## 5. 注册中心（`registry.py`）
 
 ```python
-{
-    "reason": "触发 -7% 止损线（当前 -8.3%）",  # 人类可读
-    "suggested_price": 15.84,                    # 建议卖出价（close × discount）
-    "urgency": "urgent"                          # "urgent" | "normal"
-}
+@register
+class MyStrategy:
+    name = "MyStrategy"
+    category = "my_category"
+    description = "..."
+
+    def signal_buy(self, code, name, sector, df) -> Signal | None: ...
+    def signal_sell(self, position, df) -> dict | None: ...
 ```
 
-**`suggested_price` 的折扣率差异：**
-- 止损/跌破均线：`close × 0.99`（-1%，需要快速出逃）
-- 止盈：`close × 0.995`（-0.5%，不急，可以挂高一点）
+`@register` 在 import 时实例化策略类并按 `name` 注册到全局 `_STRATEGIES` 字典。`rquant/strategy/__init__.py` 导入各子模块即触发注册，无需显式调用。
 
 ---
 
-## 8. 辅助：_calc_ma()
+## 6. 策略清单（8 大类 / 10 个策略）
+
+| 大类 | 策略 | 模块 | 核心逻辑 |
+|------|------|------|----------|
+| `volume_breakout` | VpBreakout | `vp_breakout.py` | 突破 20 日新高 + 量比 ≥ 1.5 + 强势收盘 |
+| `turtle` | DonchianTurtle | `donchian.py` | 20 日新高入场，10 日新低离场，2×ATR 止损 |
+| `etf_rotation` | CrossBorderDca | `cross_border_dca.py` | 跨境 ETF：MA60 下方 + RSI<35 → 低位买入 |
+| `etf_rotation` | DividendLowvolRotation | `dividend_lowvol_rotation.py` | 红利低波：20 日动量 + 放量确认 → 轮动持有 |
+| `factor` | MultiFactor | `multi_factor.py` | 8 因子（动量×2+趋势×3+量价×3）+ 4 过滤 + 横截面排序 |
+| `grid` | GridMartingale | `grid_martingale.py` | 20 日区间网格 + 马丁加仓预警 |
+| `pattern` | DragonTigerPattern | `dragon_tiger.py` | 涨幅 ≥ 9.5% 近似涨停 + 连板识别 |
+| `legacy` | ChanLun2B | `chanlun2b.py` | 底分型 + 多头排列 + 量能 + RSI 共 7 重过滤 |
+| `legacy` | BuyHold | `buyhold.py` | 超跌 + 超卖 + 缩量 + 止跌共 6 重确认 |
+| `router` | ScenarioRouter | `scenario_router.py` | 根据大盘 5 状态动态路由子策略组合 |
+
+详细触发条件、信心度算法、参数参见 `STRATEGIES.md`。
+
+---
+
+## 7. 统一扫描入口
+
+### scan_stock — 跑所有策略
 
 ```python
-def _calc_ma(df: pd.DataFrame, n: int) -> float:
-    if len(df) < n:
-        return float(df["close"].iloc[-1])  # 数据不够 → 用最新收盘价兜底
-    return float(df["close"].tail(n).mean())
-```
-
-**数据不足时的兜底策略：** 不抛异常，返回最新收盘价。这避免了刚上市的新股（K 线不够 N 根）导致整个信号扫描崩溃。
-
----
-
-## 9. 调用时序（app.py → strategy）
-
-```
-GET /
-  │
-  ├─ 对于每只持仓 position:
-  │    data.fetch_kline(code, 70) → df
-  │    strategy.sell_signal(position, df) → sell_signals[]
-  │
-  └─ 对于每只标的池 stock:
-       data.fetch_kline(code, 70) → df
-       strategy.scan_stock(code, name, sector, df) → buy_signals[]
-```
-
-**注意：** 目前用 70 天拉数（`days=70`），而均线窗口最长 60。70 ≥ 60 + 少量缓冲，够用。但如果加更长的均线（如 MA120），这里也要改。
-
----
-
-## 10. 扩展指南
-
-### 加一个新买入策略
-
-```python
-# 1. 在 strategy.py 写函数
-def my_strategy(code, name, sector, df) -> Signal | None:
-    if df is None or len(df) < MIN_BARS:
-        return None
-    # ... 你的判断逻辑 ...
-    return Signal(
-        code=code, name=name, sector=sector,
-        strategy="MyStrategy",
-        current_price=close,
-        suggested_buy=round(close * 1.005, 2),
-        stop_loss=..., take_profit=...,
-        reason="...", confidence=...
-    )
-
-# 2. 在 scan_stock() 里加一行
-def scan_stock(code, name, sector, df):
-    signals = []
-    for sig in (
-        chanlun2b_signal(code, name, sector, df),
-        buyhold_signal(code, name, sector, df),
-        my_strategy(code, name, sector, df),   # ← 加这行
-    ):
+def scan_stock(code: str, name: str, sector: str, df: pd.DataFrame) -> list[Signal]:
+    for strat in all_strategies():
+        sig = strat.signal_buy(code, name, sector, df)
         if sig is not None:
             signals.append(sig)
     return signals
 ```
 
-app.py 不用改——`scan_stock()` 返回的 `list[Signal]` 自动包含新策略。
+每个策略独立判断，互不排斥。同一只股票可能触发多个策略信号。
 
-### 调整参数
+### scan_category — 按大类跑策略
 
-所有策略参数都是硬编码在函数体内。修改步骤：
-1. 在目标函数中找到对应常量
-2. 直接改数值
-3. 同步修改同一策略内的 `reason` 字符串（如果改了阈值）
+```python
+def scan_category(category: str, code, name, sector, df) -> list[Signal]:
+    for strat in by_category(category):
+        sig = strat.signal_buy(code, name, sector, df)
+        ...
+```
+
+ScenarioRouter 用此函数按市场状态启用不同大类。
+
+### scan_sell — 卖出信号
+
+```python
+def scan_sell(position: dict, df: pd.DataFrame) -> dict | None:
+    for strat in all_strategies():
+        sig = strat.signal_sell(position, df)
+        if sig is not None:
+            return {**sig, "strategy": strat.name, "category": strat.category}
+    return None
+```
+
+**短路逻辑**：跑所有策略的 `signal_sell`，返回第一个非 `None` 的卖出信号。
+
+**调用链：** `routes.py:index()` → 预加载所有 K 线 → 遍历持仓调 `scan_sell()` / 遍历标的池调 `scan_stock()` → 渲染前端。
 
 ---
 
-## 11. 设计约束 / 已知局限
+## 8. 场景路由器（ScenarioRouter）
+
+### 大盘状态识别
+
+`market_regime.py` 基于上证指数 K 线（默认 `sh000001`）的 MA60/MA120/close 关系判定 5 种状态：
+
+| 状态 | 条件 | 含义 |
+|------|------|------|
+| `STRONG_BULL` | MA60 > MA120×1.02 + close > MA120×1.05 | 强进攻 |
+| `BULL` | MA60 > MA120 + close > MA120 | 进攻 |
+| `SIDEWAYS` | 其他 | 震荡 |
+| `BEAR` | MA60 < MA120 + close < MA120 | 防守 |
+| `STRONG_BEAR` | MA60 < MA120×0.95 + close < MA120×0.95 | 极致防守 |
+
+### 状态 → 子策略映射
+
+| 状态 | 启用的子策略类别 |
+|------|------------------|
+| `STRONG_BULL` | turtle + volume_breakout + factor |
+| `BULL` | turtle + volume_breakout + factor + etf_rotation |
+| `SIDEWAYS` | factor + grid + etf_rotation |
+| `BEAR` | etf_rotation + grid + legacy |
+| `STRONG_BEAR` | etf_rotation + legacy |
+
+### 缓存策略
+
+- **实盘路径**：`get_market_regime()` 按"调用日的日期"缓存，当天状态稳定。
+- **回测路径**：传 `index_df` 时按"数据最后日期"缓存；必须传 `use_cache=False` 避免污染实盘缓存。
+- **回测入口**：`ScenarioRouter.signal_buy_at(code, name, sector, df, regime_state)` — 调用方传入已算好的 regime state。
+
+---
+
+## 9. 扩展指南
+
+### 加一个新买入策略
+
+```python
+# 1. 创建 rquant/strategy/<category>/<name>.py
+from ..base import Signal, ma
+from ..registry import register
+
+@register
+class MyStrategy:
+    name = "MyStrategy"
+    category = "my_category"
+    description = "..."
+
+    MA_N = 20
+    TAKE_PROFIT = 0.15
+    STOP_LOSS = -0.07
+
+    def signal_buy(self, code, name, sector, df) -> Signal | None:
+        if df is None or len(df) < self.MA_N:
+            return None
+        close = float(df["close"].iloc[-1])
+        # ... 你的判断逻辑 ...
+        return Signal(
+            code=code, name=name, sector=sector,
+            strategy=self.name, category=self.category,
+            current_price=close,
+            suggested_buy=round(close * 1.005, 2),
+            stop_loss=round(close * (1 + self.STOP_LOSS), 2),
+            take_profit=round(close * (1 + self.TAKE_PROFIT), 2),
+            reason="...", confidence=80.0, extra={},
+        )
+
+    def signal_sell(self, position, df) -> dict | None:
+        # 卖出逻辑
+        ...
+```
+
+```python
+# 2. 在 rquant/strategy/<category>/__init__.py 加：
+from . import my_strategy  # noqa: F401
+
+# 3. 在 rquant/strategy/__init__.py 加：
+from .my_category import my_strategy  # noqa: F401
+```
+
+**新策略 0 配置接入**——`@register` 自动发现，`scan_stock` 无需改动。
+
+### 调整参数
+
+策略参数是类属性，运行时可改：
+
+```python
+from rquant.strategy import get
+get("DonchianTurtle").TAKE_PROFIT = 0.30
+```
+
+---
+
+## 10. 设计约束 / 已知局限
 
 | 约束 | 说明 |
 |------|------|
-| 单时间帧 | 只用日线（`scale=240`），不做多帧确认 |
-| 无成交量 | 不检查缩量/放量 |
-| 无市场环境 | 不区分牛熊，`market_state` 永远是 SIDEWAYS |
-| 无仓位计算 | 信号只说买不买，不谈买多少 |
-| 无止损移动 | 止损价在信号生成时固定，不随行情上移 |
-| 无季节性 | 不处理除权除息 |
-| 硬编码阈值 | -7%/+15%/0.95 等全写在代码里，无配置文件 |
+| 单时间帧 | 策略基于日 K，不跨帧确认（GridMartingale 理想用分钟级） |
+| 无复权处理 | 不处理除权除息（依赖数据源提供的复权价格） |
+| 无仓位计算 | 信号只说买不买，仓位由回测引擎或前端决定 |
+| 固定止损止盈 | 各策略硬编码止盈止损参数，无动态调整 |
+| 财务因子缺失 | MultiFactor 当前仅技术因子，PE/PB/ROE 待财务数据源接入 |
+| 涨停不可买 | DragonTigerPattern 用涨幅近似涨停，无法判断涨停板是否可买入 |
+| 场景路由器依赖大盘 K 线 | 无指数数据时回退到 SIDEWAYS |

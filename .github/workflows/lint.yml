@@ -16,3 +16,16 @@ jobs:
       - run: uv run ruff check
       - run: uv run ruff format --check
       - run: uv run python -c "from app import app; print('OK')"
+
+  markdownlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DavidAnson/markdownlint-cli2-action@v19
+        with:
+          globs: |
+            README.md
+            STRATEGIES.md
+            TODOLIST.md
+            CHANGELOG.md
+            docs/*.md

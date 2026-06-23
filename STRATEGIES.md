@@ -11,14 +11,14 @@
 ## 目录
 
 - [通用规范](#通用规范)
-- [9 个策略详解](#9-个策略详解)
+- [10 个策略详解](#10-个策略详解)
   - [VpBreakout — 量价共振突破](#1-vpbreakout--量价共振突破)
   - [DonchianTurtle — 海龟/唐奇安通道](#2-donchianturtle--海龟唐奇安通道)
   - [CrossBorderDca — 跨境 ETF 定投](#3-crossborderdca--跨境-etf-定投)
   - [DividendLowvolRotation — 红利低波轮动](#4-dividendlowvolrotation--红利低波轮动)
-  - [MultiFactor — 多因子选股](#5-multifactor--多因子选股)
+  - [MultiFactor — 多因子选股](#5-multifactor--多因子选股v2-完整版)
   - [GridMartingale — 网格/马丁格尔](#6-gridmartingale--网格马丁格尔)
-- [DragonTigerPattern — 游资形态（涨停/连板）](#7-dragontigerpattern--游资形态涨停连板)
+  - [DragonTigerPattern — 游资形态（涨停/连板）](#7-dragontigerpattern--游资形态涨停连板)
   - [ChanLun2B — 缠论二买（优化版）](#8-chanlun2b--缠论二买优化版)
   - [BuyHold — 低吸（优化版）](#9-buyhold--低吸优化版)
   - [ScenarioRouter — 场景路由器（牛/熊/震荡 → 子策略）](#10-scenariorouter--场景路由器牛熊震荡--子策略)
@@ -34,21 +34,19 @@
 ### 调用方式
 
 ```python
-import strategy
+from rquant.strategy import scan_stock, scan_category, scan_sell, get
 
-# 跑所有 9 个策略
-sigs = strategy.scan_stock(code, name, sector, df)
+# 跑所有 10 个策略
+sigs = scan_stock(code, name, sector, df)
 
 # 按大类过滤
-sigs = strategy.scan_category("turtle", code, name, sector, df)
+sigs = scan_category("turtle", code, name, sector, df)
 
 # 跑单个策略
-sigs = strategy.scan_category("legacy", code, name, sector, df)
-# 取特定策略
-sig = strategy.get("ChanLun2B").signal_buy(code, name, sector, df)
+sig = get("ChanLun2B").signal_buy(code, name, sector, df)
 
 # 卖出信号（跨所有策略）
-sig = strategy.sell_signal(position, df)
+sig = scan_sell(position, df)
 ```
 
 ### Signal 数据结构
@@ -68,7 +66,7 @@ class Signal:
     reason: str                  # 信号原因（人话）
     confidence: float            # 信心度 0-100
     market_state: str = "SIDEWAYS"
-    extra: dict                  # 策略特有字段（原始指标/参数）
+    extra: dict[str, Any]        # 策略特有字段（原始指标/参数）
 ```
 
 ### 严格时序原则
@@ -76,13 +74,15 @@ class Signal:
 **绝对不用未来数据**。所有策略在 `signal_buy(code, df)` 中调用 `df` 时，`df` 必须只包含 ≤ 当前决策日的数据。回测时如果用切片：
 
 ```python
+from rquant.strategy import scan_stock
+
 # ✅ 正确
 hist = data.fetch_kline(code, days)              # 全量
 df_at_dt = hist[hist["date"] <= decision_date]   # 在 dt 决策时只取 ≤ dt
-strategy.scan_stock(code, name, sector, df_at_dt)
+scan_stock(code, name, sector, df_at_dt)
 
 # ❌ 错误：dt 决策时用到 dt+1 之后的数据
-strategy.scan_stock(code, name, sector, hist)
+scan_stock(code, name, sector, hist)
 ```
 
 ### 信心度约定
@@ -106,7 +106,7 @@ strategy.scan_stock(code, name, sector, hist)
 
 ---
 
-## 9 个策略详解
+## 10 个策略详解
 
 ### 1. VpBreakout — 量价共振突破
 
@@ -122,7 +122,7 @@ strategy.scan_stock(code, name, sector, hist)
 
 #### 信心度算法
 
-```
+```text
 confidence = 60 + min(10, (量比 - 1.5) × 10)
 ```
 
@@ -222,7 +222,7 @@ STOP_LOSS = -0.08
 
 #### 信心度
 
-```
+```text
 confidence = max(40, min(85, 100 - RSI × 1.4))
 ```
 
@@ -247,12 +247,13 @@ RSI 越低信心越高（线性插值 40-85）。
 #### 特别说明
 
 ⚠️ 跨境 ETF 有 **T+0/T+1 差异** 和 **溢价折价问题**，实盘需关注：
+
 - QDII 折溢价 > 2% 时建议等回归
 - T+0 跨境（如恒生系列）当天可买卖
 
 #### ETF 池子
 
-在 `strategies/etf_rotation/universe.py:CROSS_BORDER_ETFS`：
+在 `rquant/strategy/etf_rotation/universe.py:CROSS_BORDER_ETFS`：
 纳指ETF / 标普500 / 港股通互联网 / 恒生科技 / 恒生医疗 / 中概互联
 
 #### 参数
@@ -282,7 +283,7 @@ STOP_LOSS = -0.08
 
 #### 信心度
 
-```
+```text
 confidence = max(45, min(80, 50 + 20日涨幅 × 2))
 ```
 
@@ -308,12 +309,13 @@ confidence = max(45, min(80, 50 + 20日涨幅 × 2))
 #### 特别说明
 
 ⚠️ **完整版需股息率因子**（当前用动量近似）：
+
 - 实战应加入"股息率 > 4%" 过滤
 - 财务数据需东财/聚宽
 
 #### ETF 池子
 
-`strategies/etf_rotation/universe.py:DIVIDEND_LOWVOL_ETFS`：
+`rquant/strategy/etf_rotation/universe.py:DIVIDEND_LOWVOL_ETFS`：
 红利低波100 / 红利ETF / 中证红利 / 红利100 / 价值100 / 央企红利
 
 #### 参数
@@ -360,7 +362,7 @@ STOP_LOSS = -0.10
 
 #### 触发条件
 
-```
+```text
 score = 0.20·M1 + 0.15·M2 + 0.12·T1 + 0.10·T2 + 0.13·T3
       + 0.12·V1 + 0.13·V2 + 0.05·V3
 if score >= 0.5:  # 触发买入
@@ -398,6 +400,7 @@ if score >= 0.5:  # 触发买入
 #### 数据降级
 
 ⚠️ **当前缺财务因子**（PE/PB/股息率/ROE/市值）：
+
 - 完整版需要：东财/聚宽
 - 接入后加入：低 PE / 低 PB / 高股息率 / 高 ROE → 价值因子
 
@@ -454,7 +457,7 @@ open results/backtest_report.html
 
 #### 信心度
 
-```
+```text
 confidence = max(40, 70 - position_ratio × 100)
 ```
 
@@ -492,6 +495,7 @@ confidence = max(40, 70 - position_ratio × 100)
 #### 数据降级
 
 ⚠️ **当前是日线网格**（理想用分钟级）：
+
 - 升级方向：接 1 分钟 / 5 分钟 K 线
 - 日线网格信号频率低、收益空间小
 
@@ -530,7 +534,7 @@ STOP_LOSS = -0.15
 
 #### 信心度
 
-```
+```text
 confidence = max(60, min(90, 65 + 连板数 × 8))
 ```
 
@@ -555,6 +559,7 @@ confidence = max(60, min(90, 65 + 连板数 × 8))
 #### 数据降级
 
 ⚠️ **当前用涨幅近似**（需升级）：
+
 - 真实涨停板接口（10cm/20cm/30cm 区分）
 - 连板天数（市面数据源：东方财富/同花顺）
 - 龙虎榜数据（游资席位识别）
@@ -590,7 +595,7 @@ STOP_LOSS = -0.05
 
 #### 底分型识别
 
-```
+```text
 i 位置满足：
   low[i] < low[i-1] AND low[i] < low[i+1]  (低点最低)
   close[i] > close[i-1]                     (收盘站上左侧)
@@ -600,7 +605,7 @@ i 位置满足：
 
 #### 信心度
 
-```
+```text
 confidence = 60 + 量能得分(0-10) + 趋势得分(0-10) + RSI得分(0-10) + 形态得分(0-10)
 上限 90。
 ```
@@ -664,7 +669,7 @@ STOP_LOSS = -0.07
 
 #### 信心度
 
-```
+```text
 confidence = min(85, 50 + 跌幅得分(0-15) + RSI得分(0-10) + 缩量得分(0-10))
 ```
 
@@ -783,17 +788,17 @@ best.extra["router_sub_cats"] = sub_cats
 
 ```python
 # 方式 1: 用路由器（实盘）
-from strategies import get
+from rquant.strategy import get
 router = get("ScenarioRouter")
 sig = router.signal_buy(code, name, sector, df)
 
 # 方式 2: 直接看市场状态（实盘，按今天日期缓存）
-from strategies.router import get_market_regime
+from rquant.strategy.router import get_market_regime
 state = get_market_regime()
 print(state.regime, state.description)
 
 # 方式 3: 测试 / 回测时强制重算（不污染实盘缓存）
-from strategies.router import get_market_regime, clear_regime_cache
+from rquant.strategy.router import get_market_regime, clear_regime_cache
 clear_regime_cache()
 state = get_market_regime(my_index_df, use_cache=False)
 # 缓存 key 现在按 index_df 的最后日期，回测时不同 dt 互不污染
@@ -832,7 +837,7 @@ sig = router.signal_buy_at(code, name, sector, df, regime_state)
 
 ### 防御组合（保守）
 
-```
+```text
 40% DividendLowvolRotation（红利低波 ETF）
 30% CrossBorderDca（跨境 ETF 大跌时加仓）
 20% BuyHold（个股严重超跌）
@@ -843,7 +848,7 @@ sig = router.signal_buy_at(code, name, sector, df, regime_state)
 
 ### 进攻组合（积极）
 
-```
+```text
 35% VpBreakout（量价突破是核心）
 25% ChanLun2B（趋势回调买入）
 20% DonchianTurtle（趋势跟踪）
@@ -855,7 +860,7 @@ sig = router.signal_buy_at(code, name, sector, df, regime_state)
 
 ### 平衡组合
 
-```
+```text
 25% VpBreakout
 20% DonchianTurtle
 15% ChanLun2B
@@ -921,16 +926,19 @@ class MyStrategy:
             extra={...},
         )
 
-    def signal_sell(self, position, df) -> dict | None:
+    def signal_sell(self, position: dict[str, Any], df) -> dict[str, Any] | None:
         # 卖出逻辑
         ...
 ```
 
 4. **导入触发注册**：在 `rquant/strategy/<category>/__init__.py` 加：
+
    ```python
    from . import my_strategy  # noqa: F401
    ```
+
 5. **顶层导入**：`rquant/strategy/__init__.py` 加：
+
    ```python
    from .my_category import my_strategy  # noqa: F401
    ```
@@ -960,6 +968,7 @@ change_pct(df)      # 当日涨跌幅
 ### Q1: 同一只股票多个策略同时触发，怎么办？
 
 默认全显示，前端按 `confidence` 降序排。实战建议：
+
 - 同一标的不要重复建仓（总仓位 = 所有触发策略建议的最低值）
 - 高 confidence 优先
 
@@ -970,52 +979,60 @@ change_pct(df)      # 当日涨跌幅
 ### Q3: 优化版的策略反而触发少了？
 
 ✅ 这是**设计目的**。优化版用更多条件过滤假信号，触发频率降低但胜率提升。
+
 - 老版：每月 5-10 信号，胜率 ~40%
 - 优化版：每月 1-3 信号，胜率 ~60%
 
 ### Q4: 数据降级怎么办？
 
 3 个策略（MultiFactor / GridMartingale / DragonTigerPattern）需要的数据当前没接入：
+
 - 在 `Signal.extra.need_data_source` 字段明示
-- 接入新数据源后改对应策略即可，业务层 0 改动（参考 `datasources.py` 的 Sina 抽象）
+- 接入新数据源后改对应策略即可，业务层 0 改动（参考 `rquant/data_source/sina.py` 和 `rquant/data_source/pool.py`）
 
 ### Q5: 怎么回测？
 
 `signal_buy / signal_sell` 协议 + 历史 K 线就能做回测：
 
 ```python
+from rquant.strategy import scan_stock
+
 for dt in trading_days:
     hist = data.fetch_kline(code, 250)  # 拉全量
     df_at_dt = hist[hist["date"] <= dt]  # ⚠️ 严格时序切片
-    sigs = strategy.scan_stock(code, name, sector, df_at_dt)
+    sigs = scan_stock(code, name, sector, df_at_dt)
     # 按 sigs 决策买卖...
 ```
 
-完整回测引擎待开发（建议放 `backtest/` 目录）。
+完整回测引擎见 `rquant/strategy/factor/backtest_engine.py` 和 `scripts/backtest_multi_factor.py`。
 
 ### Q6: 老 API 还能用吗？
 
-✅ 能。`strategy.py` 是兼容层：
-- `chanlun2b_signal` / `buyhold_signal` 仍可用（内部调用优化版）
-- `scan_stock` / `sell_signal` 同上
-- `Signal` / `STRATEGIES` 转发
+✅ 能。根目录 `app.py` 是兼容入口，`rquant/strategy/__init__.py` 导出所有公共 API：
+
+- `scan_stock` / `scan_category` / `scan_sell` 统一扫描入口
+- `Signal` / `get` / `all_strategies` / `STRATEGIES` 策略注册访问
+- `atr` / `ma` / `rsi` / `momentum` 等通用指标函数
 
 ### Q7: 能调整参数吗？
 
 每个策略的 `name / category / description` 是固定的（注册用），其他参数都是类属性：
 
 ```python
+from rquant.strategy import get
+
 # 在策略实例上改
-strategy.get("DonchianTurtle").TAKE_PROFIT = 0.30
+get("DonchianTurtle").TAKE_PROFIT = 0.30
 
 # 或在策略类上改（影响所有新实例）
-from strategies.turtle.donchian import DonchianTurtle
+from rquant.strategy.turtle.donchian import DonchianTurtle
 DonchianTurtle.TAKE_PROFIT = 0.30
 ```
 
 ### Q8: 想跑历史回测看哪个策略最适合？
 
 参考各策略的"适用场景"+"不适用场景"。在 A 股当前弱市下：
+
 - **推荐**：DonchianTurtle、BuyHold（优化版）、CrossBorderDca
 - **谨慎**：VpBreakout（弱市突破少）
 - **观望**：DragonTigerPattern（无涨停板数据）
@@ -1024,7 +1041,7 @@ DonchianTurtle.TAKE_PROFIT = 0.30
 
 ## 版本
 
-- v1.0 (2026-06-17)：10 个策略初版（6 大类 + 3 个 legacy + 1 个 router）
+- v1.0 (2026-06-17)：10 个策略初版（8 大类，含 2 个 legacy + 1 个 router）
 - v2.0 (2026-06-19)：MultiFactor 完整版（4 因子 → 8 因子 + 4 过滤 + 横截面） + 配套回测引擎
 
 ## 维护者

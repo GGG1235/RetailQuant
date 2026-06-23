@@ -33,9 +33,11 @@
 - **文件**：`rquant/strategy/factor/factor_calc.py`
 - **问题**：`run_pipeline` 拉 K 线时用全量（默认 250 天 / datalen=5000），不按 `rebalance_date` 切片。调仓日 2025-06-01 算 20 日动量时，可能用到 2025-06-02 之后的收盘价。
 - **修复**：`run_pipeline` 第 2 步拉完 K 线后立即按 `rebalance_date` 切片：
+
   ```python
   df = df[df["date"] <= rebalance_date].reset_index(drop=True)
   ```
+
 - **影响**：月频回测数字会**下降**（之前偏乐观），修后才是真可实盘的数字。
 
 ### Verified

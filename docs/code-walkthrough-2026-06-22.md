@@ -9,7 +9,7 @@
 
 ## 一、一句话总结
 
-**RetailQuant 是一个 Flask Web + 多策略量化看板 / 回测系统。** 8 个策略（海龟、量价、缠论、低吸、ETF 轮动、跨境 DCA、网格、游资形态）+ 一个 5 状态场景路由器（ScenarioRouter）+ 8 因子横截面选股 + 两套回测引擎（多因子精细版 + 路由器骨架版），配套数据池（Sina K 线 / 行情 / 东财财务快照 / SQLite + Parquet 双存储 / 进程内 QuoteCache / 内存 MQ）。
+**RetailQuant 是一个 Flask Web + 多策略量化看板 / 回测系统。** 10 个策略（海龟、量价、多因子、缠论、低吸、ETF 轮动、跨境 DCA、网格、游资形态、场景路由器）+ 8 因子横截面选股 + 两套回测引擎（多因子精细版 + 路由器骨架版），配套数据池（Sina K 线 / 行情 / 东财财务快照 / SQLite + Parquet 双存储 / 进程内 QuoteCache / 内存 MQ）。
 
 ---
 

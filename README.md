@@ -2,11 +2,11 @@
 
 A 股个人量化看板（单实例、本地优先、零外部账号）—— Flask + 缠论近似 + 板块 Treemap + 自选股 + 数据源池。
 
-> 📖 **9 个策略的详细说明**（触发条件、信心度算法、参数、适用场景）见 [`STRATEGIES.md`](STRATEGIES.md)。本文档专注架构、启动、修改记录。
+> 📖 **10 个策略的详细说明**（触发条件、信心度算法、参数、适用场景）见 [`STRATEGIES.md`](STRATEGIES.md)。本文档专注架构、启动、修改记录。
 >
 > 📝 **最近变更**：2026-06-22 修了 3 处 P0（首页 K 线 N+1 / 路由器缓存污染回测 / 月频 look-ahead），详见 [`CHANGELOG.md`](CHANGELOG.md)。
 
-- ✅ **策略引擎**（7 大类 / 10 个策略：缠论 / 量价突破 / 海龟 / 多因子 / ETF 轮动 / 网格 / 游资 / 场景路由器）
+- ✅ **策略引擎**（8 大类 / 10 个策略：缠论 / 量价突破 / 海龟 / 多因子 / ETF 轮动 / 网格 / 游资 / 场景路由器）
 - ✅ 止损 / 止盈信号（-7% / +15% / 跌破 MA60）
 - ✅ Flask + 看板（持仓、信号、资金曲线）
 - ✅ 加仓 / 减仓 / 删除交易
@@ -64,7 +64,7 @@ uv run ruff format   # 代码自动格式化
 
 #### 目录变化
 
-```
+```text
 rquant/
 ├── business/         # 业务层：data / board / portfolio / market(新)
 ├── data_source/      # 数据层：pool / sina(拆出) / cache(拆出)
@@ -95,7 +95,7 @@ rquant/
 
 #### 验证
 
-```
+```text
 ruff check .  → All checks passed!
 ruff format   → 全部格式化
 三地址访问     → 127.0.0.1 / localhost / [::1] 全部 200
@@ -126,7 +126,7 @@ ruff format   → 全部格式化
 
 #### 目录结构
 
-```
+```text
 strategies/
 ├── __init__.py            # 入口：自动注册 + scan_stock / scan_sell
 ├── base.py                # Strategy Protocol + Signal dataclass + 指标工具
@@ -168,26 +168,26 @@ class VpBreakout:
 #### 一键调用
 
 ```python
-import strategy
+from rquant.strategy import scan_stock, scan_category, scan_sell, all_strategies
 
-# 跑所有 7 个策略
-sigs = strategy.scan_stock(code, name, sector, df)
+# 跑所有 10 个策略
+sigs = scan_stock(code, name, sector, df)
 
 # 按大类过滤
-sigs = strategy.scan_category("turtle", code, name, sector, df)
+sigs = scan_category("turtle", code, name, sector, df)
 
 # 卖出
-sig = strategy.sell_signal(position, df)
+sig = scan_sell(position, df)
 
 # 看注册了哪些策略
-for s in strategy.all_strategies():
+for s in all_strategies():
     print(s.category, s.name, s.description)
 ```
 
 #### 扩展一个新策略
 
 ```python
-# strategies/xxx/yyy.py
+# rquant/strategy/xxx/yyy.py
 from ..base import Signal, ma
 from ..registry import register
 
@@ -207,7 +207,7 @@ class MyStrategy:
         ...
 ```
 
-`strategies/__init__.py` 的 import 触发 `@register`，**新策略 0 配置接入**。
+`rquant/strategy/__init__.py` 的 import 触发 `@register`，**新策略 0 配置接入**。
 
 #### 数据降级说明
 
@@ -221,7 +221,7 @@ class MyStrategy:
 
 #### 老策略优化
 
-老的 `ChanLun2B` 和 `BuyHold` 从 1 个条件升级到 4-7 个条件，并拆到 `strategies/legacy/`，接入新引擎自动注册：
+老的 `ChanLun2B` 和 `BuyHold` 从 1 个条件升级到 4-7 个条件，并拆到 `rquant/strategy/legacy/`，接入新引擎自动注册：
 
 | 策略 | 老版 | 优化版 |
 |---|---|---|
@@ -235,10 +235,10 @@ class MyStrategy:
 
 #### 验证
 
-```
+```text
 ruff check    → All checks passed!
 ruff format   → 全部格式化
-策略注册       → 9 个（6 大类 + legacy 优化版）
+策略注册       → 10 个（8 大类）
 模拟 K 线单测  → ChanLun2B conf=79.8 触发（底分型+突破+多头排列+放量）
                 BuyHold conf=85.0 触发（-25% 超跌+RSI 18+缩量止跌）
 杂乱反例       → 全部不触发 ✓
@@ -256,7 +256,7 @@ ruff format   → 全部格式化
 
 | 文件 | 行数 | 内容 |
 |---|---|---|
-| `datasources.py` | 230 | `KlineSource` / `QuoteSource` Protocol + `SinaKlineSource`（JSON 缓存）+ `SinaQuoteSource`（30s 批量缓存）+ `DataSourcePool`（优先级路由 + 健康度跟踪 + 自动 failover） |
+| `rquant/data_source/` | 908 | `DataSourcePool`（多源路由 + 健康度跟踪 + failover）+ `SinaKlineSource`（SQLite 缓存）+ `SinaQuoteSource`（30s 批量缓存 + QuoteCache）+ `ParquetStore` + `Mq`（内存 pub-sub）|
 
 #### 业务层简化
 
@@ -267,7 +267,7 @@ ruff format   → 全部格式化
 
 #### 接口零变更
 
-```
+```text
 ✓ data.fetch_kline(code, days) -> pd.DataFrame     (签名 + 返回)
 ✓ data.get_watchlist_codes() / add/remove
 ✓ data.get_stock / upsert_stock / get_pool
@@ -287,7 +287,7 @@ ruff format   → 全部格式化
 
 #### 回归证据
 
-```
+```text
 ruff check    → All checks passed!
 ruff format   → 全部格式化
 接口回归       → 8/8 通过
@@ -356,7 +356,7 @@ ruff format   → 全部格式化
 
 ## 架构（rquant 包 / 5 层）
 
-```
+```text
 rquant/                              # 主包
 ├── business/                        # 业务层
 │   ├── data.py          (K线 wrapper / 自选股 / 标的池)
@@ -400,7 +400,7 @@ pool.add_quote(TencentQuoteSource(), priority=0)  # Tencent 优先，Sina 兜底
 
 ## 文件
 
-```
+```text
 rQuant/
 ├── app.py                 # 启动入口（转发到 rquant.web）
 ├── STRATEGIES.md          # 10 个策略详细文档
