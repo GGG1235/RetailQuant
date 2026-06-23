@@ -129,7 +129,7 @@ class ChanLun2B:
         ma_spread_pct = (ma5 - ma20) / ma20 * 100 if ma20 > 0 else 0
         trend_score = min(10.0, max(0.0, ma_spread_pct))
 
-        # RSI 得分：50-70 健康区间给满分，>70 不扣分（突破日允许）
+        # RSI 得分：50-70 健康区间给满分，>70 不扣分但不给满分（突破日允许）
         if self.RSI_MIN <= rsi_v <= 70:
             rsi_score = 10.0
         else:

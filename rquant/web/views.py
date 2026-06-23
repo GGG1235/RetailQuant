@@ -1,6 +1,6 @@
 """
 rquant.web.views — 视图辅助函数
-- _log / _safe_float / _safe_int
+- _safe_float / _safe_int
 - _build_watchlist_view / _pool_name_map
 - _compute_treemap
 """
@@ -10,15 +10,10 @@ from __future__ import annotations
 from config import config
 from rquant.business import data
 from rquant.business.pool_store import get_pool
-from rquant.log import info
+
 
 # Treemap 画布尺寸（与前端 Canvas 宽高比一致）
 TREEMAP_W, TREEMAP_H = config.treemap.width, config.treemap.height
-
-
-def _log(msg: str):
-    """统一日志输出（loguru 负责 stderr 输出 + 落盘 + ring buffer）"""
-    info("app", msg)
 
 
 def _safe_float(x, default: float = 0.0) -> float:

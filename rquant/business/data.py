@@ -15,6 +15,7 @@ import pandas as pd
 
 from config import config
 from rquant.data_source import pool
+from rquant.log import warning
 
 # 业务数据目录（portfolio / trades / snapshots 等 JSON 存这里）
 DATA_DIR = config.project_root / config.paths.data_dir
@@ -51,7 +52,7 @@ def fetch_kline(code: str, days: int = 250) -> pd.DataFrame:
     try:
         return pool.to_dataframe(code, days)
     except Exception as e:
-        print(f"⚠️ 拉数失败 {code}: {e}")
+        warning("data", f"拉数失败 {code}: {e}")
         return pd.DataFrame()
 
 

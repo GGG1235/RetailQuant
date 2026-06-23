@@ -17,6 +17,7 @@ import time
 from typing import Optional
 
 from config import config
+from rquant.log import info, warning, error
 
 # SQLite 缓存路径
 _DB_PATH = config.project_root / config.paths.cache_dir / config.database.eastmoney_db_name
@@ -70,19 +71,19 @@ def download_snapshot(snap_date: Optional[str] = None) -> int:
         import akshare as ak
         import pandas as pd
     except ImportError:
-        print("[eastmoney] akshare 未安装，请运行: uv add akshare")
+        error("eastmoney", "akshare 未安装，请运行: uv add akshare")
         return 0
 
-    print("[eastmoney] 正在从 akshare 拉取全 A 股行情（含 PE/PB/ROE/市值）...")
+    info("eastmoney", "正在从 akshare 拉取全 A 股行情（含 PE/PB/ROE/市值）...")
     try:
         df: pd.DataFrame = ak.stock_zh_a_spot_em()
     except Exception as e:
-        print(f"[eastmoney] 拉取失败: {e}")
-        print("[eastmoney] 提示：可能是系统代理拦截。请尝试关闭代理后重试。")
+        error("eastmoney", f"拉取失败: {e}")
+        error("eastmoney", "提示：可能是系统代理拦截。请尝试关闭代理后重试。")
         return 0
 
     if df is None or df.empty:
-        print("[eastmoney] 未获取到数据")
+        warning("eastmoney", "未获取到数据")
         return 0
 
     # 列名映射（akshare 返回中文列名）
@@ -134,7 +135,7 @@ def download_snapshot(snap_date: Optional[str] = None) -> int:
         conn.commit()
 
     conn.close()
-    print(f"[eastmoney] 快照完成: {count} 条 ({snap_date})")
+    info("eastmoney", f"快照完成: {count} 条 ({snap_date})")
     return count
 
 

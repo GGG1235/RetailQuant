@@ -36,6 +36,7 @@ rQuant.strategies.factor.multi_factor — 多因子选股（完整版 v2）
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
+import math
 
 import pandas as pd
 
@@ -48,8 +49,6 @@ from ..registry import register
 
 def _norm_tanh(x: float, scale: float = 1.0) -> float:
     """tanh 归一化到 [-1, +1]，scale 控制灵敏度（值越大越不敏感）"""
-    import math
-
     return math.tanh(x / scale)
 
 
@@ -166,7 +165,13 @@ class FilterResult:
     reasons: list[str]
 
 
-def _check_filters(df: pd.DataFrame, name: str = "", code: str = "") -> FilterResult:
+def _check_filters(
+    df: pd.DataFrame,
+    name: str = "",
+    code: str = "",
+    min_history_days: int = 60,
+    min_avg_turnover: float = 5_000_000,
+) -> FilterResult:
     """4 道过滤：停牌 / 流动性 / ST / 上市天数"""
     reasons: list[str] = []
 
@@ -174,19 +179,19 @@ def _check_filters(df: pd.DataFrame, name: str = "", code: str = "") -> FilterRe
     if float(df["volume"].iloc[-1]) <= 0:
         reasons.append("停牌（成交量=0）")
 
-    # 2. 流动性：20 日均成交额 > 5000 万（用 volume * close 估算）
+    # 2. 流动性：20 日均成交额（用 volume * close 估算）
     if len(df) >= 20:
         avg_turnover = float((df["close"].tail(20) * df["volume"].tail(20)).mean())
-        if avg_turnover < 5_000_000:  # 500 万
-            reasons.append(f"流动性差（20日均成交额 {avg_turnover / 1e6:.1f}万 < 500万）")
+        if avg_turnover < min_avg_turnover:
+            reasons.append(f"流动性差（20日均成交额 {avg_turnover / 1e6:.1f}万 < {min_avg_turnover / 1e4:.0f}万）")
 
     # 3. ST：名称含 ST
     if "ST" in (name or "").upper() or "退" in (name or ""):
         reasons.append("ST / 退市股")
 
-    # 4. 上市天数：K 线 < 60 视为新股/数据不足
-    if len(df) < 60:
-        reasons.append(f"上市/数据天数不足（{len(df)} < 60）")
+    # 4. 上市天数：K 线不足视为新股/数据不足
+    if len(df) < min_history_days:
+        reasons.append(f"上市/数据天数不足（{len(df)} < {min_history_days}）")
 
     return FilterResult(passed=len(reasons) == 0, reasons=reasons)
 
@@ -240,7 +245,13 @@ class MultiFactor:
 
     def score(self, df: pd.DataFrame, name: str = "", code: str = "") -> tuple[float, dict]:
         """对单只股票打分（含过滤），返回 (score, 详情)"""
-        flt = _check_filters(df, name=name, code=code)
+        flt = _check_filters(
+            df,
+            name=name,
+            code=code,
+            min_history_days=self.MIN_HISTORY_DAYS,
+            min_avg_turnover=self.MIN_AVG_TURNOVER,
+        )
         if not flt.passed:
             return float("-inf"), {"filtered": True, "reasons": flt.reasons}
 

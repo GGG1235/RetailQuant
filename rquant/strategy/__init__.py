@@ -11,6 +11,7 @@ import pandas as pd
 
 from .base import Signal, Strategy, atr, change_pct, highest, lowest, ma, momentum, prev_ma, rsi, vol_ratio
 from .registry import STRATEGIES, all_strategies, by_category, categories, get, register
+from rquant.log import warning
 
 # 触发子模块的 @register
 from .etf_rotation import cross_border_dca, dividend_lowvol_rotation  # noqa: F401
@@ -35,7 +36,7 @@ def scan_stock(code: str, name: str, sector: str, df: pd.DataFrame) -> list[Sign
         try:
             sig = strat.signal_buy(code, name, sector, df)
         except Exception as e:
-            print(f"⚠️ 策略 {strat.name} 异常 {code}: {e}")
+            warning("strategy", f"策略 {strat.name} 异常 {code}: {e}")
             sig = None
         if sig is not None:
             signals.append(sig)
@@ -51,7 +52,7 @@ def scan_category(category: str, code: str, name: str, sector: str, df: pd.DataF
         try:
             sig = strat.signal_buy(code, name, sector, df)
         except Exception as e:
-            print(f"⚠️ 策略 {strat.name} 异常 {code}: {e}")
+            warning("strategy", f"策略 {strat.name} 异常 {code}: {e}")
             sig = None
         if sig is not None:
             signals.append(sig)
@@ -66,7 +67,7 @@ def scan_sell(position: dict, df: pd.DataFrame) -> dict | None:
         try:
             sig = strat.signal_sell(position, df)
         except Exception as e:
-            print(f"⚠️ 策略 {strat.name} 卖出异常 {position.get('code', '')}: {e}")
+            warning("strategy", f"策略 {strat.name} 卖出异常 {position.get('code', '')}: {e}")
             continue
         if sig is not None:
             return {**sig, "strategy": strat.name, "category": strat.category}

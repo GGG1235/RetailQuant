@@ -25,14 +25,13 @@ from rquant.business.pool_store import (
     get_watchlist_codes,
     remove_from_watchlist,
 )
-from rquant.log import get_recent_logs
+from rquant.log import get_recent_logs, info
 from rquant.strategy import all_strategies, scan_sell, scan_stock
 
 from .views import (
     CATEGORY_LABELS,
     _build_watchlist_view,
     _compute_treemap,
-    _log,
     _pool_name_map,
     _safe_float,
     _safe_int,
@@ -46,7 +45,7 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/")
     def index():
-        _log("首页被访问 —— 如果你看到这行，说明浏览器确实连接到了服务器")
+        info("web", "首页被访问 —— 如果你看到这行，说明浏览器确实连接到了服务器")
         positions_raw = pf.get_positions()
         pool_rows = get_pool()
 
@@ -58,7 +57,7 @@ def register_routes(app: Flask) -> None:
             try:
                 klines[code] = data.fetch_kline(code, 70)
             except Exception as e:
-                _log(f"K 线拉取失败 {code}: {e}")
+                info("web", f"K 线拉取失败 {code}: {e}")
                 klines[code] = pd.DataFrame()  # type: ignore[name-defined]
 
         # 1. 持仓（市值 / 盈亏）
@@ -272,7 +271,7 @@ def register_routes(app: Flask) -> None:
     def api_boards():
         """返回板块排行 JSON + Treemap 坐标"""
         board_type = request.args.get("type", "sector")
-        _log(f"GET /api/boards?type={board_type}")
+        info("web", f"GET /api/boards?type={board_type}")
         try:
             if board_type == "concept":
                 boards = board.fetch_concept_boards(30)
@@ -280,18 +279,18 @@ def register_routes(app: Flask) -> None:
                 boards = board.fetch_sector_boards(30)
             boards = _compute_treemap(boards)
             if not boards:
-                _log(f"/api/boards: {board_type} 板块数据为空")
+                info("web", f"/api/boards: {board_type} 板块数据为空")
             else:
-                _log(f"/api/boards: Treemap坐标已计算, {board_type} {len(boards)} 个板块")
+                info("web", f"/api/boards: Treemap坐标已计算, {board_type} {len(boards)} 个板块")
             return jsonify({"type": board_type, "boards": boards, "count": len(boards)})
         except Exception as e:
-            _log(f"/api/boards 异常: {e}")
+            info("web", f"/api/boards 异常: {e}")
             return jsonify({"type": board_type, "boards": [], "count": 0, "error": str(e)}), 500
 
     @app.route("/api/board/<code>/stocks")
     def api_board_stocks(code):
         """返回板块成分股 TOP 20（涨幅降序）"""
-        _log(f"GET /api/board/{code}/stocks")
+        info("web", f"GET /api/board/{code}/stocks")
         try:
             stocks = board.fetch_board_stocks(code, 20)
             # 同步写入全局股票字典
@@ -304,12 +303,12 @@ def register_routes(app: Flask) -> None:
                     turnover=s.get("turnover", 0),
                 )
             if not stocks:
-                _log(f"/api/board/{code}/stocks: 成分股数据为空")
+                info("web", f"/api/board/{code}/stocks: 成分股数据为空")
             else:
-                _log(f"/api/board/{code}/stocks: 返回 {len(stocks)} 只股票")
+                info("web", f"/api/board/{code}/stocks: 返回 {len(stocks)} 只股票")
             return jsonify({"code": code, "stocks": stocks, "count": len(stocks)})
         except Exception as e:
-            _log(f"/api/board/{code}/stocks 异常: {e}")
+            info("web", f"/api/board/{code}/stocks 异常: {e}")
             return jsonify({"code": code, "stocks": [], "count": 0, "error": str(e)}), 500
 
     # ============== 自选股 API ==============
@@ -330,13 +329,13 @@ def register_routes(app: Flask) -> None:
         codes = get_watchlist_codes()
         if code in codes:
             remove_from_watchlist(code)
-            _log(f"自选股 移除: {code}")
+            info("web", f"自选股 移除: {code}")
             return jsonify({"ok": True, "code": code, "in_watchlist": False, "action": "removed"})
         add_to_watchlist(code)
-        info = data.get_stock(code)
-        if info.get("name"):
-            data.upsert_stock(code, name=info["name"])
-        _log(f"自选股 添加: {code}")
+        stock_info = data.get_stock(code)
+        if stock_info.get("name"):
+            data.upsert_stock(code, name=stock_info["name"])
+        info("web", f"自选股 添加: {code}")
         return jsonify({"ok": True, "code": code, "in_watchlist": True, "action": "added"})
 
     @app.route("/api/watchlist/stocks")
@@ -344,7 +343,7 @@ def register_routes(app: Flask) -> None:
         """返回自选股行情（从内存字典补全，含是否持仓判断）"""
         codes = get_watchlist_codes()
         rows = _build_watchlist_view(codes, pf.get_positions())
-        _log(f"自选股 行情 API: {len(rows)} 只")
+        info("web", f"自选股 行情 API: {len(rows)} 只")
         return jsonify({"stocks": rows, "count": len(rows)})
 
     @app.route("/api/watchlist/analyze/<code>")
@@ -354,9 +353,9 @@ def register_routes(app: Flask) -> None:
         if not code:
             return jsonify({"ok": False, "error": "缺少 code"}), 400
 
-        info = data.get_stock(code)
-        name = info.get("name") or code
-        sector = info.get("sector") or ""
+        stock_info = data.get_stock(code)
+        name = stock_info.get("name") or code
+        sector = stock_info.get("sector") or ""
         df = data.fetch_kline(code, 160)
         if df.empty:
             return jsonify({"ok": False, "error": "暂无可分析的 K 线数据", "code": code}), 404
@@ -395,7 +394,7 @@ def register_routes(app: Flask) -> None:
             analyses.append(item)
 
         analyses.sort(key=lambda x: (not x["triggered"], -x["score"], x["strategy"]))
-        _log(f"自选股 分析: {code}，策略 {len(analyses)} 个")
+        info("web", f"自选股 分析: {code}，策略 {len(analyses)} 个")
         return jsonify(
             {
                 "ok": True,
@@ -445,7 +444,7 @@ def register_routes(app: Flask) -> None:
         if amount <= 0:
             return jsonify({"ok": False, "error": "金额必须大于0"}), 400
         result = funds.topup_funds(uid, amount)
-        _log(f"充值: +{amount:,.0f}，总资金 {result['total_funds']:,.0f}，可用 {result['available_funds']:,.0f}")
+        info("web", f"充值: +{amount:,.0f}，总资金 {result['total_funds']:,.0f}，可用 {result['available_funds']:,.0f}")
         return jsonify(
             {
                 "ok": True,
@@ -466,9 +465,12 @@ def register_routes(app: Flask) -> None:
         result = funds.withdraw_funds(uid, amount)
         actual = result["withdrawn"]
         if actual < amount:
-            _log(f"提现: 请求 {amount:,.0f}，实际 {actual:,.0f}（可用资金不足，已清零）")
+            info("web", f"提现: 请求 {amount:,.0f}，实际 {actual:,.0f}（可用资金不足，已清零）")
         else:
-            _log(f"提现: -{actual:,.0f}，总资金 {result['total_funds']:,.0f}，可用 {result['available_funds']:,.0f}")
+            info(
+                "web",
+                f"提现: -{actual:,.0f}，总资金 {result['total_funds']:,.0f}，可用 {result['available_funds']:,.0f}",
+            )
         return jsonify(
             {
                 "ok": True,

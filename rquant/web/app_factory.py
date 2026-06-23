@@ -15,10 +15,10 @@ from flask import Flask
 
 from config import config
 from rquant.data_source import start_mq
-from rquant.log import error, init_logging
+from rquant.log import error, info, init_logging
 
 from .routes import register_routes
-from .views import _log
+
 
 DEFAULT_PORT = int(os.environ.get("RQUANT_PORT", str(config.server.port)))
 
@@ -45,8 +45,8 @@ def create_app() -> Flask:
 def run(port: int = DEFAULT_PORT) -> None:
     """启动 waitress（双栈 IPv4 + IPv6）"""
     app = create_app()
-    print(f"rQuant 启动（双栈）：\n  http://localhost:{port}/\n  http://127.0.0.1:{port}/\n  http://[::1]:{port}/")
-    _log("日志系统已就绪，等待请求中…")
+    info("app", f"rQuant 启动（双栈）：http://localhost:{port}/  http://127.0.0.1:{port}/  http://[::1]:{port}/")
+    info("app", "日志系统已就绪，等待请求中…")
     try:
         from waitress import serve
 

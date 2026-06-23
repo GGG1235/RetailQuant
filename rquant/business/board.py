@@ -8,15 +8,14 @@ rquant.board — 板块行情业务层
 """
 
 from __future__ import annotations
-import sys
 import time
-from datetime import datetime
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from config import config
+from rquant.log import info, warning, error
 
 # ============== 数据源（东方财富 push2）==============
 
@@ -61,12 +60,6 @@ STALE_TTL = config.cache.board_stale_ttl  # 秒（过期后还能用，serve-sta
 _cache: dict[str, tuple] = {}  # key → (data, timestamp)
 
 
-def _log(msg: str):
-    ts = datetime.now().strftime("%H:%M:%S")
-    sys.stderr.write(f"[{ts}] [board] {msg}\n")
-    sys.stderr.flush()
-
-
 def _cached(key: str, allow_stale: bool = False):
     """读缓存。
 
@@ -97,12 +90,12 @@ def _fetch_boards(board_type: str, top_n: int) -> list[dict]:
     cache_key = f"boards_{board_type}"
     cached = _cached(cache_key)
     if cached is not None:
-        _log(f"{board_type} 板块: 命中缓存, {len(cached)} 条")
+        info("board", f"{board_type} 板块: 命中缓存, {len(cached)} 条")
         return cached[:top_n]
 
     fs = BOARD_TYPES.get(board_type)
     if fs is None:
-        _log(f"{board_type} 板块: 未知类型")
+        warning("board", f"{board_type} 板块: 未知类型")
         return []
 
     # 字段：f2 成交额(元) / f3 涨跌幅(×100) / f4 涨跌额 / f12 板块 code / f14 板块名
@@ -118,15 +111,15 @@ def _fetch_boards(board_type: str, top_n: int) -> list[dict]:
     try:
         r = _session.get(EAST_MONEY_URL, params=params, timeout=8)
         if r.status_code != 200:
-            _log(f"{board_type} 板块: HTTP {r.status_code}")
+            warning("board", f"{board_type} 板块: HTTP {r.status_code}")
             return _serve_stale(cache_key, board_type, top_n)
         payload = r.json()
         diff = (payload.get("data") or {}).get("diff") or {}
         if not diff:
-            _log(f"{board_type} 板块: 数据为空")
+            warning("board", f"{board_type} 板块: 数据为空")
             return _serve_stale(cache_key, board_type, top_n)
     except Exception as e:
-        _log(f"{board_type} 板块: 拉取失败 {e}")
+        error("board", f"{board_type} 板块: 拉取失败 {e}")
         return _serve_stale(cache_key, board_type, top_n)
 
     rows: list[dict] = []
@@ -148,7 +141,7 @@ def _fetch_boards(board_type: str, top_n: int) -> list[dict]:
         )
     # 保险再排一次
     rows.sort(key=lambda x: x["change_pct"], reverse=True)
-    _log(f"{board_type} 板块: 刷新完成, {len(rows)} 个")
+    info("board", f"{board_type} 板块: 刷新完成, {len(rows)} 个")
     _set_cache(cache_key, rows)
     return rows[:top_n]
 
@@ -157,7 +150,7 @@ def _serve_stale(cache_key: str, board_type: str, top_n: int) -> list[dict]:
     """拉取失败时兜底：返回过期但未超过 STALE_TTL 的旧数据"""
     stale = _cached(cache_key, allow_stale=True)
     if stale is not None:
-        _log(f"{board_type} 板块: 远端失败，回退 stale 缓存 ({len(stale)} 条)")
+        warning("board", f"{board_type} 板块: 远端失败，回退 stale 缓存 ({len(stale)} 条)")
         return stale[:top_n]
     return []
 
@@ -205,12 +198,12 @@ def _fetch_board_stocks(board_code: str, top_n: int) -> list[dict]:
     cache_key = f"stocks_{raw_code}"
     cached = _cached(cache_key)
     if cached is not None:
-        _log(f"成分股 {raw_code}: 命中缓存, {len(cached)} 条")
+        info("board", f"成分股 {raw_code}: 命中缓存, {len(cached)} 条")
         return cached[:top_n]
 
     # 板块 code 长这样：BK0420（东财）
     if not raw_code.upper().startswith("BK"):
-        _log(f"成分股 {board_code}: 非板块 code（{raw_code}），跳过")
+        warning("board", f"成分股 {board_code}: 非板块 code（{raw_code}），跳过")
         return []
 
     # f:!2 排除 B 股；如需排除 ST 改 f:!50
@@ -226,15 +219,15 @@ def _fetch_board_stocks(board_code: str, top_n: int) -> list[dict]:
     try:
         r = _session.get(EAST_MONEY_URL, params=params, timeout=8)
         if r.status_code != 200:
-            _log(f"成分股 {raw_code}: HTTP {r.status_code}")
+            warning("board", f"成分股 {raw_code}: HTTP {r.status_code}")
             return _serve_stale_stocks(cache_key, raw_code, top_n)
         payload = r.json()
         diff = (payload.get("data") or {}).get("diff") or {}
         if not diff:
-            _log(f"成分股 {raw_code}: 数据为空")
+            warning("board", f"成分股 {raw_code}: 数据为空")
             return _serve_stale_stocks(cache_key, raw_code, top_n)
     except Exception as e:
-        _log(f"成分股 {raw_code}: 拉取失败 {e}")
+        error("board", f"成分股 {raw_code}: 拉取失败 {e}")
         return _serve_stale_stocks(cache_key, raw_code, top_n)
 
     rows: list[dict] = []
@@ -254,7 +247,7 @@ def _fetch_board_stocks(board_code: str, top_n: int) -> list[dict]:
             }
         )
     rows.sort(key=lambda x: x["change_pct"], reverse=True)
-    _log(f"成分股 {raw_code}: 刷新完成, {len(rows)} 只")
+    info("board", f"成分股 {raw_code}: 刷新完成, {len(rows)} 只")
     _set_cache(cache_key, rows)
     return rows[:top_n]
 
@@ -263,7 +256,7 @@ def _serve_stale_stocks(cache_key: str, raw_code: str, top_n: int) -> list[dict]
     """成分股拉取失败时兜底"""
     stale = _cached(cache_key, allow_stale=True)
     if stale is not None:
-        _log(f"成分股 {raw_code}: 远端失败，回退 stale 缓存 ({len(stale)} 条)")
+        warning("board", f"成分股 {raw_code}: 远端失败，回退 stale 缓存 ({len(stale)} 条)")
         return stale[:top_n]
     return []
 

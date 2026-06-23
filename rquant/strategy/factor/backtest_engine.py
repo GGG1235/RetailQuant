@@ -14,14 +14,15 @@ import numpy as np
 
 from rquant.strategy.factor.factor_calc import run_pipeline
 from rquant.business.data import fetch_kline
+from rquant.log import info
 
 # ============== 交易成本 ==============
 
-# 买入端: 佣金万1 + 双边滑点各5bp
-BUY_COST = 0.0001 + 0.001  # = 0.0011
+# 买入端: 佣金万1 + 滑点5bp
+BUY_COST = 0.0001 + 0.0005  # = 0.0006
 
-# 卖出端: 佣金万1 + 印花税千1 + 双边滑点各5bp
-SELL_COST = 0.0001 + 0.001 + 0.001  # = 0.0021
+# 卖出端: 佣金万1 + 印花税千1 + 滑点5bp
+SELL_COST = 0.0001 + 0.001 + 0.0005  # = 0.0016
 
 
 # ============== 调仓日生成 ==============
@@ -60,7 +61,7 @@ def run_backtest(
     """
     rebalance_dates = _monthly_rebalance_dates(start_date, end_date)
     if not rebalance_dates:
-        print("[backtest] 无调仓日")
+        info("backtest", "无调仓日")
         return None
 
     # 确保 start_date 是第一个调仓日
@@ -68,18 +69,17 @@ def run_backtest(
     if first_rb < start_date:
         rebalance_dates = [d for d in rebalance_dates if d >= start_date]
 
-    print(f"[backtest] 调仓日: {len(rebalance_dates)} 个 ({rebalance_dates[0]} ~ {rebalance_dates[-1]})")
+    info("backtest", f"调仓日: {len(rebalance_dates)} 个 ({rebalance_dates[0]} ~ {rebalance_dates[-1]})")
 
     # ----- 状态变量 -----
     cash = initial_capital
     holdings: dict[str, float] = {}  # code → 持有股数
 
     monthly_nav: list[dict] = []  # {date, nav, cash, equity}
-    daily_values: list[float] = [initial_capital]
     total_turnover = 0.0
 
     for i, rb_date in enumerate(rebalance_dates):
-        print(f"\n[backtest] 调仓 {i + 1}/{len(rebalance_dates)}: {rb_date}")
+        info("backtest", f"调仓 {i + 1}/{len(rebalance_dates)}: {rb_date}")
 
         # 1) 运行选股流水线
         df_picks = run_pipeline(
@@ -90,14 +90,14 @@ def run_backtest(
         )
 
         if df_picks is None or df_picks.empty:
-            print("  → 无选股结果，跳过本期")
+            info("backtest", "→ 无选股结果，跳过本期")
             # 记录净值（不变）
             total = cash + _holdings_value(holdings, rb_date)
             monthly_nav.append({"date": rb_date, "nav": total, "cash": cash, "equity": total - cash})
             continue
 
         new_codes = list(df_picks["code"])
-        print(f"  → 选股: {len(new_codes)} 只")
+        info("backtest", f"→ 选股: {len(new_codes)} 只")
 
         # 2) 卖出不在新持仓中的股票
         sold_value = 0.0
@@ -110,44 +110,58 @@ def run_backtest(
                     cash += proceed
                     sold_value += proceed
                     total_turnover += shares * price
-                    # print(f"    卖出 {code} × {shares:.0f} @ {price:.2f} → +{proceed:.0f}")
 
-        # 3) 买入新持仓（等权重）
+        # 3) 等权重调仓（买入新标的 / 调整已有仓位）
         n_new = len(new_codes)
         if n_new == 0:
             continue
 
-        capital_per_stock = (cash + _holdings_value(holdings, rb_date)) / n_new
-        new_holdings: dict[str, float] = {}
+        total_capital = cash + _holdings_value(holdings, rb_date)
+        target_per_stock = total_capital / n_new
 
         for code in new_codes:
             price = _get_price(code, rb_date)
             if price <= 0:
                 continue
-            # 扣除买入成本
-            cost_per_share = price * (1 + BUY_COST)
-            shares = int(capital_per_stock / cost_per_share)
-            if shares > 0:
-                cost = shares * cost_per_share
-                cash -= cost
-                new_holdings[code] = shares
-                total_turnover += shares * price
-                # print(f"    买入 {code} × {shares} @ {price:.2f} → -{cost:.0f}")
 
-        # 4) 更新持仓
-        # 保留未卖出的原有仓位
-        for code, shares in holdings.items():
-            new_holdings[code] = shares
-        holdings = new_holdings
+            current_shares = holdings.get(code, 0)
+            current_value = current_shares * price
+            diff_value = target_per_stock - current_value
+
+            if abs(diff_value) < price:
+                # 差额不够买 1 股，跳过
+                continue
+
+            if diff_value > 0:
+                # 加仓（含新建仓）
+                cost_per_share = price * (1 + BUY_COST)
+                buy_shares = int(diff_value / cost_per_share)
+                if buy_shares > 0:
+                    cost = buy_shares * cost_per_share
+                    cash -= cost
+                    holdings[code] = current_shares + buy_shares
+                    total_turnover += buy_shares * price
+            else:
+                # 减仓
+                sell_shares = int(abs(diff_value) / (price * (1 - SELL_COST)))
+                sell_shares = min(sell_shares, current_shares)
+                if sell_shares > 0:
+                    proceed = sell_shares * price * (1 - SELL_COST)
+                    cash += proceed
+                    total_turnover += sell_shares * price
+                    new_shares = current_shares - sell_shares
+                    if new_shares > 0:
+                        holdings[code] = new_shares
+                    else:
+                        holdings.pop(code, None)
 
         # 5) 记录月末净值
         equity = _holdings_value(holdings, rb_date)
         total = cash + equity
         monthly_nav.append({"date": rb_date, "nav": total, "cash": cash, "equity": equity})
-        daily_values.append(total)
 
         n_hold = len(holdings)
-        print(f"  持仓 {n_hold} 只 | 现金 ¥{cash:,.0f} | 股票市值 ¥{equity:,.0f} | 总资产 ¥{total:,.0f}")
+        info("backtest", f"持仓 {n_hold} 只 | 现金 ¥{cash:,.0f} | 股票市值 ¥{equity:,.0f} | 总资产 ¥{total:,.0f}")
 
     # 最终净值（用最后一天收盘价清算）
 
@@ -155,13 +169,11 @@ def run_backtest(
     metrics = _compute_metrics(monthly_nav, initial_capital, total_turnover)
     metrics["monthly_nav"] = monthly_nav
 
-    print(f"\n{'=' * 50}")
-    print(f"累计收益率: {metrics['cumulative_return']:.2%}")
-    print(f"年化收益率: {metrics['annual_return']:.2%}")
-    print(f"最大回撤:   {metrics['max_drawdown']:.2%}")
-    print(f"夏普比率:   {metrics['sharpe_ratio']:.2f}")
-    print(f"平均换手率: {metrics['turnover']:.2%}")
-    print(f"{'=' * 50}")
+    info("backtest", f"累计收益率: {metrics['cumulative_return']:.2%}")
+    info("backtest", f"年化收益率: {metrics['annual_return']:.2%}")
+    info("backtest", f"最大回撤:   {metrics['max_drawdown']:.2%}")
+    info("backtest", f"夏普比率:   {metrics['sharpe_ratio']:.2f}")
+    info("backtest", f"平均换手率: {metrics['turnover']:.2%}")
 
     return metrics
 

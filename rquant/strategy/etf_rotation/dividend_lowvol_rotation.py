@@ -100,4 +100,12 @@ class DividendLowvolRotation:
                 "suggested_price": round(close * 0.99, 2),
                 "urgency": "urgent",
             }
+        # 跌破 MA20 离场
+        ma20 = ma(df, 20)
+        if close < ma20:
+            return {
+                "reason": f"跌破 MA20（¥{ma20:.3f}），趋势走坏",
+                "suggested_price": round(close * 0.995, 2),
+                "urgency": "normal",
+            }
         return None

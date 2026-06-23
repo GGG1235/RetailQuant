@@ -97,4 +97,12 @@ class CrossBorderDca:
                 "suggested_price": round(close * 0.99, 2),
                 "urgency": "urgent",
             }
+        # 跌破 MA60 离场
+        ma60 = ma(df, self.MA_N)
+        if close < ma60:
+            return {
+                "reason": f"跌破 MA60（¥{ma60:.3f}），趋势走坏",
+                "suggested_price": round(close * 0.995, 2),
+                "urgency": "normal",
+            }
         return None

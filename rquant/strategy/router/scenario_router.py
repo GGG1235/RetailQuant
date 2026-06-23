@@ -37,6 +37,7 @@ import pandas as pd
 from ..base import Signal
 from ..registry import register
 from .market_regime import MarketRegime, MarketState, get_market_regime
+from rquant.log import warning
 
 
 # 状态 → 子策略类别映射
@@ -100,14 +101,12 @@ class ScenarioRouter:
             return None
 
         # 跑这些子策略（按多个类别聚合）
-        from .scenario_router import by_category_categories
-
         sigs: list[Signal] = []
         for strat in by_category_categories(sub_cats):
             try:
                 sig = strat.signal_buy(code, name, sector, df)
             except Exception as e:
-                print(f"⚠️ {strat.name} 异常: {e}")
+                warning("scenario_router", f"{strat.name} 异常: {e}")
                 continue
             if sig is not None:
                 sigs.append(sig)

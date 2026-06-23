@@ -126,7 +126,7 @@ class DragonTigerPattern:
             return None
         pnl_pct = (close / avg_cost - 1) * 100
 
-        # 次日不板 → 走人
+        # 次日不板 → 走人（游资核心纪律，优先级最高）
         if chg < 0.03 and pnl_pct > 3:
             return {
                 "reason": f"次日不板（涨幅 {chg * 100:+.2f}% < 3%），游资走人",

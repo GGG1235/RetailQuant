@@ -17,6 +17,7 @@ import pandas as pd
 
 from rquant.data_source.eastmoney import get_all_snapshots
 from rquant.business.data import fetch_kline
+from rquant.log import info, warning
 
 # ============== 常量 ==============
 
@@ -172,11 +173,11 @@ def run_pipeline(
     # 1) 获取财务快照
     snapshots = get_all_snapshots(snap_date)
     if not snapshots:
-        print(f"[factor_calc] 无财务快照: {snap_date}")
+        warning("factor_calc", f"无财务快照: {snap_date}")
         return None
 
     all_codes = list(snapshots.keys())
-    print(f"[factor_calc] 财务快照: {len(all_codes)} 只")
+    info("factor_calc", f"财务快照: {len(all_codes)} 只")
 
     # 2) 拉取 K 线（全部股票）
     kline_map: dict[str, pd.DataFrame] = {}
@@ -192,19 +193,19 @@ def run_pipeline(
             continue
         kline_map[code] = df
         fetched += 1
-    print(f"[factor_calc] K 线获取: {fetched}/{len(all_codes)}")
+    info("factor_calc", f"K 线获取: {fetched}/{len(all_codes)}")
 
     # 3) 硬过滤
     passed = _hard_filter(all_codes, snapshots, kline_map, rebalance_date)
-    print(f"[factor_calc] 硬过滤后: {len(passed)} 只 (ST/次新/停牌已剔除)")
+    info("factor_calc", f"硬过滤后: {len(passed)} 只 (ST/次新/停牌已剔除)")
 
     if len(passed) < top_n:
-        print(f"[factor_calc] 可用股票不足 Top-{top_n}，仅 {len(passed)} 只")
+        warning("factor_calc", f"可用股票不足 Top-{top_n}，仅 {len(passed)} 只")
         return None
 
     # 4) 因子提取
     df_factors = _extract_factors(passed, snapshots, kline_map)
-    print(f"[factor_calc] 因子提取: {len(df_factors)} 只有效数据")
+    info("factor_calc", f"因子提取: {len(df_factors)} 只有效数据")
 
     # 5) 预处理（逐列去极值 + 标准化）
     factor_cols = ["PE", "PB", "ROE", "MOM", "MCAP"]
@@ -215,6 +216,10 @@ def run_pipeline(
             df_factors[f"{col}_z"] = _zscore_series(df_factors[col])
 
     # 6) 方向对齐：PE/PB/MCAP 越小越好 → 取反；ROE/MOM 越大越好 → 保持
+    # ★ 先算有效因子数（基于 _z 列，此时 NaN 还在，fillna 之后 NaN 就变 0 了）
+    z_cols = ["PE_z", "PB_z", "ROE_z", "MOM_z", "MCAP_z"]
+    valid_count = df_factors[z_cols].notna().sum(axis=1)
+
     df_factors["PE_score"] = -df_factors["PE_z"].fillna(0)
     df_factors["PB_score"] = -df_factors["PB_z"].fillna(0)
     df_factors["ROE_score"] = df_factors["ROE_z"].fillna(0)
@@ -223,7 +228,6 @@ def run_pipeline(
 
     # 7) 等权重合成（仅使用有效因子的均值）
     score_cols = ["PE_score", "PB_score", "ROE_score", "MOM_score", "MCAP_score"]
-    valid_count = df_factors[score_cols].notna().sum(axis=1)
     df_factors["total_score"] = df_factors[score_cols].sum(axis=1) / valid_count.replace(0, 1)
 
     # 8) 降序排序 + Top-N
@@ -235,5 +239,5 @@ def run_pipeline(
     out_cols = ["code", "PE_score", "PB_score", "ROE_score", "MOM_score", "MCAP_score", "total_score"]
     existing = [c for c in out_cols if c in df_result.columns]
 
-    print(f"[factor_calc] Top-{top_n} 选股完成")
+    info("factor_calc", f"Top-{top_n} 选股完成")
     return df_result[existing]
