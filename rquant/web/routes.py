@@ -19,6 +19,12 @@ from flask import (
 )
 
 from rquant.business import board, data, funds, portfolio as pf, system, user as user_mgr
+from rquant.business.pool_store import (
+    add_to_watchlist,
+    get_pool,
+    get_watchlist_codes,
+    remove_from_watchlist,
+)
 from rquant.log import get_recent_logs
 from rquant.strategy import all_strategies, scan_sell, scan_stock
 
@@ -42,7 +48,7 @@ def register_routes(app: Flask) -> None:
     def index():
         _log("首页被访问 —— 如果你看到这行，说明浏览器确实连接到了服务器")
         positions_raw = pf.get_positions()
-        pool_rows = data.get_pool()
+        pool_rows = get_pool()
 
         # 0. 一次性预加载所有需要的 K 线（持仓 + 标的池，去重）
         # 避免 sell_signals / buy_signals / positions 三处各自 fetch 同一只股票
@@ -137,7 +143,7 @@ def register_routes(app: Flask) -> None:
         # 4. 交易历史 + 5. 自选股视图
         trades = sorted(pf.list_trades(), key=lambda x: x["datetime"], reverse=True)
         snapshots = sorted(pf.list_snapshots(), key=lambda x: x["date"])
-        watchlist_codes = data.get_watchlist_codes()
+        watchlist_codes = get_watchlist_codes()
         data.populate_watchlist_info(watchlist_codes)
         watchlist_stocks = _build_watchlist_view(watchlist_codes, positions_raw)
 
@@ -311,7 +317,7 @@ def register_routes(app: Flask) -> None:
     @app.route("/api/watchlist")
     def api_watchlist():
         """返回当前自选股 code 列表"""
-        codes = data.get_watchlist_codes()
+        codes = get_watchlist_codes()
         return jsonify({"codes": codes, "count": len(codes)})
 
     @app.route("/api/watchlist/toggle", methods=["POST"])
@@ -321,12 +327,12 @@ def register_routes(app: Flask) -> None:
         code = (payload.get("code", "") or "").strip().lower()
         if not code:
             return jsonify({"ok": False, "error": "缺少 code"}), 400
-        codes = data.get_watchlist_codes()
+        codes = get_watchlist_codes()
         if code in codes:
-            data.remove_from_watchlist(code)
+            remove_from_watchlist(code)
             _log(f"自选股 移除: {code}")
             return jsonify({"ok": True, "code": code, "in_watchlist": False, "action": "removed"})
-        data.add_to_watchlist(code)
+        add_to_watchlist(code)
         info = data.get_stock(code)
         if info.get("name"):
             data.upsert_stock(code, name=info["name"])
@@ -336,7 +342,7 @@ def register_routes(app: Flask) -> None:
     @app.route("/api/watchlist/stocks")
     def api_watchlist_stocks():
         """返回自选股行情（从内存字典补全，含是否持仓判断）"""
-        codes = data.get_watchlist_codes()
+        codes = get_watchlist_codes()
         rows = _build_watchlist_view(codes, pf.get_positions())
         _log(f"自选股 行情 API: {len(rows)} 只")
         return jsonify({"stocks": rows, "count": len(rows)})

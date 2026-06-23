@@ -17,16 +17,13 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# 确保项目根在 sys.path
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-
-from rquant.data_source.eastmoney import download_snapshot, last_snapshot_date  # noqa: E402
-from rquant.strategy.factor.backtest_engine import run_backtest  # noqa: E402
+from rquant.data_source.eastmoney import download_snapshot, last_snapshot_date
+from rquant.strategy.factor.backtest_engine import run_backtest
 
 
 def main():
     # ----- 配置 -----
+    ROOT = Path(__file__).resolve().parent.parent
     SNAP_DATE = "2025-12-31"  # 财务快照日期
     START_DATE = "2026-01-01"  # 回测起始
     END_DATE = "2026-06-17"  # 回测结束

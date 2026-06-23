@@ -5,13 +5,7 @@ rQuant 启动入口（向后兼容）
 - 内部转发到 rquant.web.app_factory
 """
 
-import sys
-from pathlib import Path
-
-# 让 rquant 包可 import
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from rquant.web.app_factory import create_app, run  # noqa: E402
+from rquant.web.app_factory import create_app, run
 
 # 暴露 Flask 实例（CI / gunicorn / 其它工具链期望这个名字）
 app = create_app()

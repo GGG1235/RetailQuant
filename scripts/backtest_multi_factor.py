@@ -23,18 +23,14 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-# 把项目根目录加进 sys.path（让 scripts/ 下能 import rquant）
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(_PROJECT_ROOT))
+import pandas as pd
 
-import pandas as pd  # noqa: E402
-
-from rquant.business import data  # noqa: E402
-from rquant.strategy.factor.multi_factor import MultiFactor  # noqa: E402
+from rquant.business import data
+from rquant.business.pool_store import get_pool, get_watchlist_codes
+from rquant.strategy.factor.multi_factor import MultiFactor
 
 
 # ============== 数据结构 ==============
@@ -501,9 +497,9 @@ def main():
     args = parser.parse_args()
 
     # 标的池
-    pool = data.get_pool()
+    pool = get_pool()
     if args.watchlist_only:
-        codes = set(data.get_watchlist_codes())
+        codes = set(get_watchlist_codes())
         pool = [s for s in pool if s["code"] in codes] if codes else pool
 
     if not pool:

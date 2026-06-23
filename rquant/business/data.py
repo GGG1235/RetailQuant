@@ -105,22 +105,3 @@ def populate_watchlist_info(codes: list[str]) -> None:
             )
     except Exception:
         pass
-
-
-# ============== 转发：标的池 / 自选股 ==============
-# 老 API 兼容：routes.py 还在 data.get_pool() / data.get_watchlist_codes() 调用
-# 实际实现全部在 rquant.business.pool_store
-
-from .pool_store import (  # noqa: E402,F401
-    add_to_pool,
-    add_to_watchlist,
-    enable_in_pool,
-    get_by_code,
-    get_pool,
-    get_pool_codes,
-    get_watchlist_codes,
-    pool_stats,
-    reload_pool,
-    remove_from_pool,
-    remove_from_watchlist,
-)

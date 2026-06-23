@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from config import config
 from rquant.business import data
+from rquant.business.pool_store import get_pool
 from rquant.log import info
 
 # Treemap 画布尺寸（与前端 Canvas 宽高比一致）
@@ -57,7 +58,7 @@ def _build_watchlist_view(codes: list[str], positions_raw: list[dict]) -> list[d
 
 def _pool_name_map() -> dict[str, str]:
     """code → name 的标的池查找表（用于买入选股时回填名称）"""
-    return {s["code"]: s["name"] for s in data.get_pool()}
+    return {s["code"]: s["name"] for s in get_pool()}
 
 
 def _compute_treemap(boards: list[dict]) -> list[dict]:

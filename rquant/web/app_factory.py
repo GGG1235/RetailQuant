@@ -5,22 +5,20 @@ rquant.web.app_factory — Flask 应用工厂
 """
 
 from __future__ import annotations
+
+import errno
 import os
+import sys
 from pathlib import Path
 
-# 让 templates / static 能被 Flask 找到（基于项目根目录）
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_TEMPLATE_DIR = _PROJECT_ROOT / "templates"
-_STATIC_DIR = _PROJECT_ROOT / "static"
+from flask import Flask
 
-from flask import Flask  # noqa: E402
+from config import config
+from rquant.data_source import start_mq
+from rquant.log import error, init_logging
 
-from config import config  # noqa: E402
-from rquant.data_source import start_mq  # noqa: E402
-from rquant.log import init_logging  # noqa: E402
-
-from .routes import register_routes  # noqa: E402
-from .views import _log  # noqa: E402
+from .routes import register_routes
+from .views import _log
 
 DEFAULT_PORT = int(os.environ.get("RQUANT_PORT", str(config.server.port)))
 
@@ -31,10 +29,13 @@ def create_app() -> Flask:
     init_logging()
     # 启动后台消息队列 worker（批量刷新 K 线 / 异步任务派发）
     start_mq()
+
+    # 让 templates / static 能被 Flask 找到（基于项目根目录）
+    _project_root = Path(__file__).resolve().parent.parent.parent
     app = Flask(
         __name__,
-        template_folder=str(_TEMPLATE_DIR),
-        static_folder=str(_STATIC_DIR),
+        template_folder=str(_project_root / "templates"),
+        static_folder=str(_project_root / "static"),
     )
     app.secret_key = config.server.secret_key  # 从 config.toml 读取
     register_routes(app)
@@ -58,6 +59,14 @@ def run(port: int = DEFAULT_PORT) -> None:
     except ImportError:
         # Flask dev server 不支持双 listen，回退到单 host
         app.run(host="127.0.0.1", port=port, debug=True)
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE:
+            error(
+                "app",
+                f"端口 {port} 已被占用，rQuant 可能已在运行中。如需重启请先关闭已有进程：lsof -ti:{port} | xargs kill",
+            )
+            sys.exit(1)
+        raise
 
 
 if __name__ == "__main__":
