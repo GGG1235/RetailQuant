@@ -100,7 +100,7 @@ def init_logging(level: str = "INFO") -> None:
             sys.stderr,
             format=(
                 "<green>{time:HH:mm:ss}</green> | "
-                "<level>{level: <8}</level> | "
+                "<level>{level}</level> | "
                 "<cyan>{extra[module]}</cyan> | "
                 "<level>{message}</level>"
             ),
@@ -111,7 +111,7 @@ def init_logging(level: str = "INFO") -> None:
         # sink 2: 落盘文件（纯文本，自动轮转 + 压缩 + 清理）
         logger.add(
             _LOG_FILE,
-            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra[module]: <16} | {message}",
+            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level} | {extra[module]} | {message}",
             level=level,
             rotation="10 MB",  # 单文件超过 10 MB 轮转
             retention="30 days",  # 保留 30 天
