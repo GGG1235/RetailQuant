@@ -245,6 +245,7 @@ run(pool, start, end):
 ```
 
 **额外亮点**：
+
 - `score(df, name, code)` 返回 `(score, detail)`，detail 包含 8 因子原始值 + 8 加权分量 + top3 贡献
 - `score_batch(code_df_map)` 批量打分 + 横截面 rank
 - `compute_factors(df)` 给回测/调试用，输出原始因子值
@@ -425,12 +426,14 @@ python scripts/backtest_multi_factor.py \
 ### ✅ 已做到的（合规）
 
 1. **多因子精细版回测**（`scripts/backtest_multi_factor.py:267`）：
+
    ```python
    df_until = df[df["date"] <= dt].reset_index(drop=True)
    # ★ 决策日 dt 的可用数据严格截到 dt
    ```
 
 2. **路由器**（`router/scenario_router.py:68`）：
+
    ```python
    state = get_market_regime()
    # MarketRegime._REGIME_CACHE 按日缓存，今天的判定不会用到明天数据

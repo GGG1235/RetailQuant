@@ -60,6 +60,7 @@ class Signal:
 ```
 
 **字段语义：**
+
 - `suggested_buy` = `current_price × 1.005`，即比现价高 0.5%。允许小幅追高，不要求精确抄底。
 - `stop_loss` / `take_profit` 的基数由各策略自行决定（一般为 `suggested_buy`）。
 - `confidence` 是策略内置信度评分，范围 0-100，前端按此降序排列信号。
