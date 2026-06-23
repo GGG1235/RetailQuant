@@ -126,6 +126,3 @@ def report_strategy_run(name: str, signal_count: int = 0) -> None:
             "signals_today": prev.get("signals_today", 0) + signal_count,
             "last_run": time.time(),
         }
-
-
-

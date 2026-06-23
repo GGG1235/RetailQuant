@@ -48,6 +48,7 @@ _log_lock = threading.Lock()
 
 # ============================================================
 
+
 def _ring_sink(message: Message) -> None:
     """loguru sink：从 Message 提取结构化数据写入 ring buffer"""
     try:
@@ -64,6 +65,7 @@ def _ring_sink(message: Message) -> None:
     except Exception:
         pass  # 日志系统自身不能崩
 
+
 # ============================================================
 # 初始化状态
 # ============================================================
@@ -75,6 +77,7 @@ _init_lock = threading.Lock()
 # ============================================================
 # 公开 API
 # ============================================================
+
 
 def init_logging(level: str = "INFO") -> None:
     """初始化日志系统（幂等）
@@ -110,11 +113,11 @@ def init_logging(level: str = "INFO") -> None:
             _LOG_FILE,
             format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra[module]: <16} | {message}",
             level=level,
-            rotation="10 MB",       # 单文件超过 10 MB 轮转
-            retention="30 days",    # 保留 30 天
-            compression="zip",      # 轮转后压缩为 zip
+            rotation="10 MB",  # 单文件超过 10 MB 轮转
+            retention="30 days",  # 保留 30 天
+            compression="zip",  # 轮转后压缩为 zip
             encoding="utf-8",
-            enqueue=True,           # 多进程/线程安全写入
+            enqueue=True,  # 多进程/线程安全写入
         )
 
         # sink 3: 内存 ring buffer
