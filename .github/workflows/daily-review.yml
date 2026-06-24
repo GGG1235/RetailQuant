@@ -2,7 +2,7 @@ name: daily-review
 
 on:
   schedule:
-    - cron: "30 7 * * 1-5"  # 15:30 CST = 07:30 UTC, Mon-Fri
+    - cron: "0 7 * * 1-5"  # UTC 07:00 = CST 15:00, Mon-Fri（GitHub 调度会有 0-60min 延迟，预期 ~15:00-16:00 CST 执行）
   workflow_dispatch:        # 手动触发
 
 permissions:
@@ -29,19 +29,16 @@ jobs:
       - name: Run daily review
         run: uv run python scripts/review.py
 
-      - name: Commit and push reports
-        if: success()
-        run: |
-          TODAY=$(date +%Y-%m-%d)
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Only add today's report files
-          git add -f "reports/${TODAY}.json" "reports/${TODAY}.html" "reports/${TODAY}.pdf" "reports/${TODAY}.png" "reports/${TODAY}.typ" 2>/dev/null || true
-
-          if git diff --cached --quiet; then
-            echo "No report changes to commit"
-          else
-            git commit -m "daily review report: ${TODAY}"
-            git push
-          fi
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: review-${{ github.run_id }}
+          name: "复盘报告 — $(date +%Y-%m-%d)"
+          body: "rQuant 每日量化复盘报告（$(date +%Y-%m-%d)），由 GitHub Actions 自动生成。"
+          files: |
+            reports/$(date +%Y-%m-%d).json
+            reports/$(date +%Y-%m-%d).html
+            reports/$(date +%Y-%m-%d).pdf
+            reports/$(date +%Y-%m-%d).png
+            reports/$(date +%Y-%m-%d).typ
+          fail_on_unmatched_files: false
