@@ -29,16 +29,29 @@ jobs:
       - name: Run daily review
         run: uv run python scripts/review.py
 
+      - name: Set release metadata
+        id: meta
+        run: |
+          echo "date=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
       - name: Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: review-${{ github.run_id }}
-          name: "复盘报告 — $(date +%Y-%m-%d)"
-          body: "rQuant 每日量化复盘报告（$(date +%Y-%m-%d)），由 GitHub Actions 自动生成。"
+          name: 复盘报告 — ${{ steps.meta.outputs.date }}
+          body: |
+            rQuant 每日量化复盘报告（${{ steps.meta.outputs.date }}），由 GitHub Actions 自动生成。
+
+            ### 文件说明
+            - `.json` — 原始数据
+            - `.typ` — Typst 源码
+            - `.html` — 网页
+            - `.pdf` — PDF 报告
+            - `.png` — 预览图
           files: |
-            reports/$(date +%Y-%m-%d).json
-            reports/$(date +%Y-%m-%d).html
-            reports/$(date +%Y-%m-%d).pdf
-            reports/$(date +%Y-%m-%d).png
-            reports/$(date +%Y-%m-%d).typ
+            reports/${{ steps.meta.outputs.date }}.json
+            reports/${{ steps.meta.outputs.date }}.html
+            reports/${{ steps.meta.outputs.date }}.pdf
+            reports/${{ steps.meta.outputs.date }}.png
+            reports/${{ steps.meta.outputs.date }}.typ
           fail_on_unmatched_files: false
