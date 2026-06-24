@@ -180,7 +180,7 @@ def to_typst(report_date: str | None = None) -> Path | None:
   numbering: "1",
 )
 
-#set text(font: ("New Computer Modern", "PingFang SC", "Songti SC"), lang: "zh", size: 9.5pt)
+#set text(font: ("New Computer Modern", "Noto Serif CJK SC", "Noto Sans CJK SC", "PingFang SC", "Songti SC"), lang: "zh", size: 9.5pt)
 #set par(justify: true, leading: 0.55em)
 
 // 标题样式
