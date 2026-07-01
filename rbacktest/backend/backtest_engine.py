@@ -92,11 +92,19 @@ def list_available_strategies() -> list[dict]:
 # Helper: convert shares from a target dollar amount
 # ---------------------------------------------------------------------------
 
-def _calc_shares(target_value: float, price: float, contract_size: int) -> float:
-    """Calculate whole-lot share count for *target_value* at *price*."""
+def _calc_shares(target_value: float, price: float, contract_size: int, cash_available: float | None = None) -> float:
+    """Calculate share count for *target_value* at *price*.
+
+    VNPY internally treats volume as shares when contract size=1.
+    Capped by available cash when provided.
+    """
     if price <= 0:
         return 0.0
-    return float(int(target_value / price / contract_size) * contract_size)
+    shares: float = float(int(target_value / price))
+    if cash_available is not None:
+        max_shares: float = float(int(cash_available / price))
+        shares = min(shares, max_shares)
+    return max(shares, 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -117,16 +125,17 @@ class EqualWeightStrategy(AlphaStrategy):
 
     def on_bars(self, bars: dict[str, BarData]) -> None:
         """Monthly rebalance: rank by lookback return, equal-weight top_k."""
-        dt = next(iter(bars.values())).datetime if bars else None
-        if dt is None or dt.day > 5:
-            return
-
+        # Always accumulate bar history for every symbol
         for sym, bar in bars.items():
             if sym not in self.bar_history:
                 self.bar_history[sym] = []
             self.bar_history[sym].append(bar)
             if len(self.bar_history[sym]) > self.lookback + 2:
                 self.bar_history[sym] = self.bar_history[sym][-(self.lookback + 2):]
+
+        dt = next(iter(bars.values())).datetime if bars else None
+        if dt is None or dt.day > 5:
+            return
 
         # Score every stock by past return
         scored: list[tuple[str, float]] = []

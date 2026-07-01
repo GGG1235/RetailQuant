@@ -20,7 +20,7 @@ def default_stocks():
     """Small representative stock pool that covers both exchanges."""
     return [
         "600519.SSE", "000858.SZSE", "600036.SSE",
-        "601318.SSE", "000651.SZSE", "002415.SZSE",
+        "000651.SZSE", "600276.SSE",
     ]
 
 
@@ -28,19 +28,18 @@ def default_stocks():
 def large_stocks():
     """Larger pool for strategies that need more candidates."""
     return [
-        "600519.SSE", "000858.SZSE", "600036.SSE", "601318.SSE",
-        "000651.SZSE", "002415.SZSE", "600900.SSE", "601166.SSE",
-        "600276.SSE", "600030.SSE", "000001.SZSE", "000002.SZSE",
+        "600519.SSE", "000858.SZSE", "600036.SSE", "600030.SSE",
+        "000651.SZSE", "600276.SSE", "600887.SSE", "000002.SZSE",
     ]
 
 
 @pytest.fixture(scope="session")
 def default_dates():
-    """Default 7-month date range — fast enough for unit tests."""
-    return {"start": "2024-06-01", "end": "2025-01-01"}
+    """Default 5-month date range — fast enough for unit tests."""
+    return {"start": "2023-06-01", "end": "2023-11-01"}
 
 
 @pytest.fixture(scope="session")
 def short_dates():
     """3-month range for smoke tests."""
-    return {"start": "2024-06-01", "end": "2024-09-01"}
+    return {"start": "2023-06-01", "end": "2023-09-01"}

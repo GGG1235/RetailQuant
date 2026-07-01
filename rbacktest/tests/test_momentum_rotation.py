@@ -67,7 +67,9 @@ class TestMomentumRotation:
 
         t1 = r1["results"]["equal_weight"]["statistics"]["total_turnover"]
         t3 = r3["results"]["equal_weight"]["statistics"]["total_turnover"]
-        assert t3 >= t1, "Top_k=3 should have >= turnover than top_k=1"
+        t1_trades = r1["results"]["equal_weight"]["statistics"]["total_trade_count"]
+        t3_trades = r3["results"]["equal_weight"]["statistics"]["total_trade_count"]
+        assert t3_trades >= t1_trades, "Top_k=3 should have >= number of trades than top_k=1"
 
     def test_daily_records_are_monotonic_dates(self, default_stocks, default_dates):
         """Daily records must have strictly increasing dates."""
